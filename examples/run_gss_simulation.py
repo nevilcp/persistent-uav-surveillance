@@ -10,8 +10,8 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 
-from uav_surveil.config import load_scenario
-from uav_surveil.gss.simulation import GSSSimulation
+from uav_surveil.config import load_scenario  # noqa: E402
+from uav_surveil.gss.simulation import GSSSimulation  # noqa: E402
 
 
 def main():

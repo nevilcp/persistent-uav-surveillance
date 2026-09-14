@@ -24,9 +24,7 @@ class ConfigManager:
         self.config_dir.mkdir(exist_ok=True)
         self._current_config: SystemParameters | None = None
 
-    def load_config(
-        self, source: str | Path | SystemParameters
-    ) -> SystemParameters:
+    def load_config(self, source: str | Path | SystemParameters) -> SystemParameters:
         """Load configuration from various sources.
 
         Args:

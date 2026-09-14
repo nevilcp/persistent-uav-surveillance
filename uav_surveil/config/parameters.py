@@ -216,12 +216,8 @@ class FailureTriggerConfig(BaseModel):
     t_s: float | None = Field(
         default=None, description="Failure time (s) for kind=time"
     )
-    x: float | None = Field(
-        default=None, description="X coordinate for kind=position"
-    )
-    y: float | None = Field(
-        default=None, description="Y coordinate for kind=position"
-    )
+    x: float | None = Field(default=None, description="X coordinate for kind=position")
+    y: float | None = Field(default=None, description="Y coordinate for kind=position")
     soc_threshold: float | None = Field(
         default=None, description="SoC threshold for kind=soc"
     )
@@ -450,6 +446,9 @@ class SystemParameters(BaseModel):
 
     def summary(self) -> str:
         """Generate human-readable parameter summary."""
+        grid_dims = self.grid.get_cell_count(
+            self.mission.area_width, self.mission.area_length
+        )
         return f"""
 UAV Surveillance System Configuration: {self.config_name}
 ═══════════════════════════════════════════════════════
@@ -466,7 +465,7 @@ UAV Specifications:
 
 Grid Configuration:
   • Cell size: {self.grid.cell_size}m
-  • Grid dimensions: {self.grid.get_cell_count(self.mission.area_width, self.mission.area_length)}
+  • Grid dimensions: {grid_dims}
 
 STL Contracts:
   • Max revisit gap: {self.stl.max_revisit_gap}s

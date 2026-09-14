@@ -338,7 +338,9 @@ class FailureManager:
                         for cid in failed_uav.route_list[0].cell_sequence:
                             w.writerow([cid])
                 print("🗂️  Failure meta exported for orphan analysis")
-        except Exception as _e:  # noqa: BLE001 - optional export, must not abort failure handling
+        except (
+            Exception
+        ) as _e:  # noqa: BLE001 - optional export, must not abort failure handling
             print(f"⚠️  Failure meta export failed: {_e}")
         # Mark as failed and freeze tail index; `_fly_home` (RTB) is
         # derived from state so this alone stops any RTB motion.
@@ -405,10 +407,13 @@ class FailureManager:
                         ]
                     )
         print(
-            f"🛑 FAILURE: UAV {failed_uav.id} at t={self.sim.metrics.current_time:.0f}s → freezing & reallocating"
+            f"🛑 FAILURE: UAV {failed_uav.id} at "
+            f"t={self.sim.metrics.current_time:.0f}s → freezing & reallocating"
         )
+        route_id = failed_uav.route_list[0].id if failed_uav.route_list else ""
         print(
-            f"🛡️  CONTINGENCY LAUNCHED: UAV {contingency.id} taking over route {failed_uav.route_list[0].id if failed_uav.route_list else ''} from tail index {contingency._waypoint_idx}"
+            f"🛡️  CONTINGENCY LAUNCHED: UAV {contingency.id} taking over "
+            f"route {route_id} from tail index {contingency._waypoint_idx}"
         )
 
     def _handover(self, failed_id: str) -> None:
@@ -431,7 +436,8 @@ class FailureManager:
                 u.last_insert_time = self.sim.metrics.current_time
         self.sim._failure_markers["t_handover"] = self.sim.metrics.current_time
         print(
-            f"✅ HANDOVER COMPLETE at t={self.sim.metrics.current_time:.0f}s – neighbors reverted, steady state resumed (16+4+0)"
+            f"✅ HANDOVER COMPLETE at t={self.sim.metrics.current_time:.0f}s "
+            f"– neighbors reverted, steady state resumed (16+4+0)"
         )
         # Log event
         with contextlib.suppress(Exception):

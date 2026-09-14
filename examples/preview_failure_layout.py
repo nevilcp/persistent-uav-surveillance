@@ -3,12 +3,12 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")  # headless
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
-from uav_surveil.config import load_scenario
+from uav_surveil.config import load_scenario  # noqa: E402
 
 
 def draw_layout(ax, cfg):
@@ -39,8 +39,8 @@ def draw_layout(ax, cfg):
     ax.legend(loc="upper right")
 
     title_str = (
-        f"Continuous Patrol – {cfg.config_name} | Algo: {cfg.optimization.route_algorithm} "
-        f"| Fleet (layout preview)"
+        f"Continuous Patrol – {cfg.config_name} | "
+        f"Algo: {cfg.optimization.route_algorithm} | Fleet (layout preview)"
     )
     ax.set_title(title_str)
 

@@ -105,20 +105,24 @@ def log_route_analysis(
         route_efficiencies.append(efficiency)
 
         print(
-            f"   Route {i+1:02d}: {cells_count:2d} cells, {distance:6.1f}m, {time_calc:5.1f}s, {efficiency:.4f} cells/m"
+            f"   Route {i+1:02d}: {cells_count:2d} cells, {distance:6.1f}m, "
+            f"{time_calc:5.1f}s, {efficiency:.4f} cells/m"
         )
 
     print("-" * 80)
     print(f"   Summary: {len(routes)} routes, {total_cells} cells total")
     print(
-        f"   Balance: {min(len(r.cell_sequence) for r in routes)}-{max(len(r.cell_sequence) for r in routes)} cells/route"
+        f"   Balance: {min(len(r.cell_sequence) for r in routes)}-"
+        f"{max(len(r.cell_sequence) for r in routes)} cells/route"
     )
     print(
-        f"   Avg route: {total_cells/len(routes):.1f} cells, {total_distance/len(routes):.1f}m, {sum(route_times)/len(routes):.1f}s"
+        f"   Avg route: {total_cells/len(routes):.1f} cells, "
+        f"{total_distance/len(routes):.1f}m, {sum(route_times)/len(routes):.1f}s"
     )
     print(f"   Max loop time: {max(route_times):.1f}s")
     print(
-        f"   Efficiency range: {min(route_efficiencies):.4f} - {max(route_efficiencies):.4f} cells/m"
+        f"   Efficiency range: {min(route_efficiencies):.4f} - "
+        f"{max(route_efficiencies):.4f} cells/m"
     )
     print("=" * 80)
 
@@ -190,7 +194,8 @@ def log_cell_coverage_gaps(
     print("=" * 60)
     print(f"   Total cells: {len(cells)}")
     print(
-        f"   Overdue cells: {len(overdue_cells)} ({len(overdue_cells)/len(cells)*100:.1f}%)"
+        f"   Overdue cells: {len(overdue_cells)} "
+        f"({len(overdue_cells)/len(cells)*100:.1f}%)"
     )
     print(f"   Coverage threshold: {threshold}s")
 
@@ -217,7 +222,8 @@ def log_cell_coverage_gaps(
         if stats["overdue"] > 0:
             pct = stats["overdue"] / stats["total"] * 100
             print(
-                f"      {region}: {stats['overdue']}/{stats['total']} overdue ({pct:.1f}%)"
+                f"      {region}: {stats['overdue']}/{stats['total']} "
+                f"overdue ({pct:.1f}%)"
             )
 
     print(f"\n   📄 Detailed log saved: {filename}")
@@ -231,7 +237,8 @@ def compare_algorithm_performance(results: dict[str, dict[str, Any]]):
     print("\n🏆 Algorithm Performance Comparison")
     print("=" * 80)
     print(
-        f"{'Algorithm':<12} {'Peak':<8} {'Rolling':<8} {'Min':<8} {'Overdue':<8} {'Loop Time':<10}"
+        f"{'Algorithm':<12} {'Peak':<8} {'Rolling':<8} {'Min':<8} "
+        f"{'Overdue':<8} {'Loop Time':<10}"
     )
     print("-" * 80)
 
@@ -243,7 +250,8 @@ def compare_algorithm_performance(results: dict[str, dict[str, Any]]):
         loop_time = metrics.get("max_loop_time", 0)
 
         print(
-            f"{algo_name:<12} {peak:<7.1f}% {rolling:<7.1f}% {min_cov:<7.1f}% {overdue:<7.1f} {loop_time:<9.1f}s"
+            f"{algo_name:<12} {peak:<7.1f}% {rolling:<7.1f}% {min_cov:<7.1f}% "
+            f"{overdue:<7.1f} {loop_time:<9.1f}s"
         )
 
     print("=" * 80)
@@ -316,9 +324,7 @@ def track_uav_routes(uavs, current_time: float, filename: str | None = None):
     return filename
 
 
-def analyze_spare_utilization(
-    simulation_logs: list[str], filename: str | None = None
-):
+def analyze_spare_utilization(simulation_logs: list[str], filename: str | None = None):
     """Analyze spare launch patterns and timing from simulation logs."""
     if filename is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005

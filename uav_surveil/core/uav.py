@@ -119,7 +119,8 @@ class UAV:
     def at_position(
         self, target_x: float, target_y: float, threshold: float = 2.0
     ) -> bool:
-        """Check if UAV is within threshold distance of a target position (e.g., cell center)."""
+        """Check if UAV is within threshold distance of a target position
+        (e.g., cell center)."""
         import math
 
         return math.hypot(self.x - target_x, self.y - target_y) <= threshold

@@ -11,14 +11,14 @@ from pathlib import Path
 # Add the uav_surveil package to the path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from uav_surveil.config import (
+from uav_surveil.config import (  # noqa: E402
     compare_scenarios,
     create_parameter_sweep,
     list_available_scenarios,
     load_scenario,
 )
-from uav_surveil.config.config_manager import ConfigManager
-from uav_surveil.stage0_battery import (
+from uav_surveil.config.config_manager import ConfigManager  # noqa: E402
+from uav_surveil.stage0_battery import (  # noqa: E402
     get_max_grid_from_config,
     optimize_battery_from_config,
     validate_mission_feasibility,
@@ -196,7 +196,8 @@ def example_7_batch_analysis():
 
     print(f"Battery analysis for grid distance {l_grid}m:")
     print(
-        f"{'Scenario':<12} {'ξ_optimal':<10} {'Feasible':<10} {'Margin (s)':<12} {'Max Grid (m)':<12}"
+        f"{'Scenario':<12} {'ξ_optimal':<10} {'Feasible':<10} "
+        f"{'Margin (s)':<12} {'Max Grid (m)':<12}"
     )
     print("-" * 60)
 
@@ -211,7 +212,9 @@ def example_7_batch_analysis():
                 f"{scenario_name:<12} {result.xi_optimal:<10.3f} {feasible_str:<10} "
                 f"{result.margin_seconds:<12.1f} {max_grid:<12.1f}"
             )
-        except Exception as e:  # noqa: BLE001 - per-scenario error report, must not abort the loop
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 - per-scenario error report, must not abort the loop
             print(f"{scenario_name:<12} ERROR: {e!s}")
 
 
@@ -233,7 +236,9 @@ if __name__ == "__main__":
         print("✅ All examples completed successfully!")
         print("=" * 60)
 
-    except Exception as e:  # noqa: BLE001 - top-level script guard, reports full traceback
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 - top-level script guard, reports full traceback
         print(f"\n❌ Error running examples: {e}")
         import traceback
 

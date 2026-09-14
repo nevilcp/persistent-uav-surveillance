@@ -59,7 +59,8 @@ def generate_routes_roundrobin(
     """
 
     print(
-        f"🔄 Round-Robin: Distributing {len(cells)} cells → {n_launch} routes (serpentine)"
+        f"🔄 Round-Robin: Distributing {len(cells)} cells → "
+        f"{n_launch} routes (serpentine)"
     )
 
     if not cells:
@@ -100,7 +101,8 @@ def generate_routes_roundrobin(
     avg_length = sum(route_lengths) / len(route_lengths) if route_lengths else 0
 
     print(
-        f"   ✅ Route balance: {min_length}-{max_length} cells/route (avg: {avg_length:.1f})"
+        f"   ✅ Route balance: {min_length}-{max_length} cells/route "
+        f"(avg: {avg_length:.1f})"
     )
 
     loop_times = [route.loop_time or 0.0 for route in route_objects]
@@ -285,7 +287,8 @@ def _calculate_route_time(
 def _order_nearest_neighbour(
     cells: list[Cell], depot: tuple[float, float]
 ) -> list[Cell]:
-    """Order cells within a route for efficient traversal using nearest neighbor heuristic."""
+    """Order cells within a route for efficient traversal using nearest
+    neighbor heuristic."""
     if len(cells) <= 2:
         return cells
 

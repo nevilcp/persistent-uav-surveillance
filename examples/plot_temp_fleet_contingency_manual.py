@@ -26,8 +26,8 @@ import os
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
 
 def _ensure_dir(path: str) -> None:
@@ -43,7 +43,9 @@ def _read_metrics_csv(path: str) -> dict[str, np.ndarray]:
         df = pd.read_csv(path)
         df.columns = [c.strip().lower() for c in df.columns]
         return {c: df[c].to_numpy(dtype=float) for c in df.columns}
-    except Exception:  # noqa: BLE001 - pandas missing or CSV unreadable, fall back to manual parsing
+    except (
+        Exception
+    ):  # noqa: BLE001 - pandas missing or CSV unreadable, fall back to manual parsing
         cols: dict[str, list[float]] = {}
         with open(path, newline="") as f:
             rdr = csv.DictReader(f)
@@ -70,7 +72,8 @@ def plot_manual_contingency(base_tag: str, t_fail: float, out_png: str) -> None:
     )  # rotation spares only (contingency excluded by sim metrics)
     if t is None or act is None or swp is None or rot is None:
         raise SystemExit(
-            "metrics CSV missing required columns: time, active_uavs, swapping_uavs, spare_uavs"
+            "metrics CSV missing required columns: "
+            "time, active_uavs, swapping_uavs, spare_uavs"
         )
 
     # Contingency step: 1 up to t_fail (exclusive), then 0 afterwards
@@ -166,7 +169,8 @@ def main() -> None:
 def plot_failure_tripanel_clean(
     base_tag: str, t_fail: float, out_png: str, theta: float = 180.0
 ) -> None:
-    """Three aligned panels: coverage, overdue, fleet state (with manual contingency)."""
+    """Three aligned panels: coverage, overdue, fleet state (with manual
+    contingency)."""
     m = _read_metrics_csv(base_tag + "_metrics.csv")
     t = m.get("time")
     cov = m.get("coverage_%")

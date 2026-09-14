@@ -29,8 +29,8 @@ import matplotlib
 
 # Use a non-interactive backend so we can save images without a GUI (no Tk)
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
 # -----------------------------------------------------------------------------
 # Utilities
@@ -47,7 +47,9 @@ def _try_read_pandas(path: str):
         import pandas as pd  # type: ignore
 
         return pd.read_csv(path)
-    except Exception:  # noqa: BLE001 - pandas missing or CSV unreadable, fall back to manual parsing
+    except (
+        Exception
+    ):  # noqa: BLE001 - pandas missing or CSV unreadable, fall back to manual parsing
         return None
 
 
@@ -295,16 +297,16 @@ def plot_compare_coverage_clean(
     palette = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
     def pretty(lbl: str) -> str:
-        l = lbl
-        if "sim_024" in l:
+        label = lbl
+        if "sim_024" in label:
             return "Under‑provisioned (N=11)"
-        if "sim_020" in l:
+        if "sim_020" in label:
             return "Baseline (N=21)"
-        if "sim_025" in l:
+        if "sim_025" in label:
             return "Over‑provisioned (N=31)"
-        if "sim_026" in l:
+        if "sim_026" in label:
             return "Baseline long‑run (N=21, 9600s)"
-        return l
+        return label
 
     for idx, (m, label) in enumerate(zip(metrics_list, labels)):
         t, cov = m.get("time"), m.get("coverage_%")
@@ -339,16 +341,16 @@ def plot_compare_violations_clean(
     palette = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
     def pretty(lbl: str) -> str:
-        l = lbl
-        if "sim_024" in l:
+        label = lbl
+        if "sim_024" in label:
             return "Under‑provisioned (N=11)"
-        if "sim_020" in l:
+        if "sim_020" in label:
             return "Baseline (N=21)"
-        if "sim_025" in l:
+        if "sim_025" in label:
             return "Over‑provisioned (N=31)"
-        if "sim_026" in l:
+        if "sim_026" in label:
             return "Baseline long‑run (N=21, 9600s)"
-        return l
+        return label
 
     for idx, (m, label) in enumerate(zip(metrics_list, labels)):
         t, viol = m.get("time"), m.get("cells_overdue")
@@ -377,16 +379,16 @@ def plot_compare_violations(
     plt.figure(figsize=(9, 3.5))
 
     def pretty(lbl: str) -> str:
-        l = lbl
-        if "sim_024" in l:
+        label = lbl
+        if "sim_024" in label:
             return "Under‑provisioned (N=11)"
-        if "sim_020" in l:
+        if "sim_020" in label:
             return "Baseline (N=21)"
-        if "sim_025" in l:
+        if "sim_025" in label:
             return "Over‑provisioned (N=31)"
-        if "sim_026" in l:
+        if "sim_026" in label:
             return "Baseline long‑run (N=21, 9600s)"
-        return l
+        return label
 
     for m, label in zip(metrics_list, labels):
         t, viol = m.get("time"), m.get("cells_overdue")
@@ -435,7 +437,9 @@ def _count_overdue_in_snapshot(path: str | None) -> int | None:
                 if val == "true":
                     cnt += 1
         return cnt
-    except Exception:  # noqa: BLE001 - best-effort CSV read, missing/malformed file falls back to None
+    except (
+        Exception
+    ):  # noqa: BLE001 - best-effort CSV read, missing/malformed file falls back to None
         return None
 
 
@@ -866,7 +870,8 @@ def _detect_reentry_post_fail(
     window_s: float = 600.0,
     range_pct: float = 3.0,
 ) -> float | None:
-    """Earliest time ≥ t_fail where rolling-average range over next window ≤ range_pct."""
+    """Earliest time ≥ t_fail where rolling-average range over next window
+    ≤ range_pct."""
     t = metrics.get("time")
     roll = metrics.get("rolling_avg_%")
     cov = metrics.get("coverage_%")
@@ -1237,8 +1242,9 @@ def plot_orphan_percentiles(
     theta: float = 180.0,
     epsilon: float = 60.0,
 ) -> None:
-    """Approximate orphan set: cells whose age jump is largest immediately after failure.
-    Plot their age percentiles over subsequent snapshots, with Θ and Θ+ε.
+    """Approximate orphan set: cells whose age jump is largest immediately
+    after failure. Plot their age percentiles over subsequent snapshots,
+    with Θ and Θ+ε.
     """
     if not snapshot_paths:
         return
@@ -1293,7 +1299,8 @@ def plot_orphan_coverage(
     top_k: int = 100,
     theta: float = 180.0,
 ) -> None:
-    """Coverage% and overdue count over time for approximate orphan set (top-K age jump)."""
+    """Coverage% and overdue count over time for approximate orphan set
+    (top-K age jump)."""
     ages = _load_snapshot_ages(snapshot_paths)
     overdue = _load_snapshot_overdue(snapshot_paths)
     if ages is None or overdue is None:
@@ -1547,7 +1554,10 @@ def main():
         "--compare-tags",
         type=str,
         default="",
-        help="Semicolon-separated list of run tags to compare (coverage & violations overlays)",
+        help=(
+            "Semicolon-separated list of run tags to compare "
+            "(coverage & violations overlays)"
+        ),
     )
     parser.add_argument(
         "--make-table",
@@ -1673,10 +1683,8 @@ def main():
             metrics_list = [read_metrics_csv(p) for p in metric_paths]
 
             comp_dir = "figures"
-            cov_out = os.path.join(
-                comp_dir,
-                f"compare_coverage_{'_vs_'.join([l.split('_')[1] for l in labels])}.png",
-            )
+            tag = "_vs_".join(lbl.split("_")[1] for lbl in labels)
+            cov_out = os.path.join(comp_dir, f"compare_coverage_{tag}.png")
             plot_compare_coverage(metrics_list, labels, cov_out, y_tick_step=5)
             # Clean, smoothed variant
             cov_out_clean = cov_out.replace(".png", "_clean.png")
@@ -1684,10 +1692,8 @@ def main():
                 metrics_list, labels, cov_out_clean, smooth_s=60.0, y_tick_step=5
             )
 
-            vio_out = os.path.join(
-                comp_dir,
-                f"compare_violations_{'_vs_'.join([l.split('_')[1] for l in labels])}.png",
-            )
+            tag = "_vs_".join(lbl.split("_")[1] for lbl in labels)
+            vio_out = os.path.join(comp_dir, f"compare_violations_{tag}.png")
             plot_compare_violations(metrics_list, labels, vio_out)
             # Clean, smoothed variant
             vio_out_clean = vio_out.replace(".png", "_clean.png")
@@ -1700,7 +1706,11 @@ def main():
                 lab: summarize_metrics(m) for lab, m in zip(labels, metrics_list)
             }
             with open(os.path.join(comp_dir, "compare_summary.txt"), "w") as f:
-                f.writelines(f"{lab}: avg={s['avg']:.1f}%, peak={s['peak']:.1f}%, time>=90%={s['time_ge_90']:.0f}s\n" for lab, s in summary.items())
+                f.writelines(
+                    f"{lab}: avg={s['avg']:.1f}%, peak={s['peak']:.1f}%, "
+                    f"time>=90%={s['time_ge_90']:.0f}s\n"
+                    for lab, s in summary.items()
+                )
 
             if args.make_table:
                 plot_comparison_table(arts, os.path.join(comp_dir, "compare_table.png"))

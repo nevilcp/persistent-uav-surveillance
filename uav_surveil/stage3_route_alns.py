@@ -295,7 +295,8 @@ def _solution_to_routes(
     # Ensure we have exactly n_launch routes
     if len(routes) < len(solution):
         print(
-            f"⚠️ ALNS produced {len(routes)} valid routes from {len(solution)} solutions"
+            f"⚠️ ALNS produced {len(routes)} valid routes "
+            f"from {len(solution)} solutions"
         )
 
     return routes

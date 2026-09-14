@@ -3,24 +3,24 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")  # Use non-GUI backend for headless environments
 
-import matplotlib.pyplot as plt
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
 # -----------------------------------------------------------------------------
 # Visual configuration
 # -----------------------------------------------------------------------------
-from matplotlib import animation, cm
+from matplotlib import animation, cm  # noqa: E402
 
-from uav_surveil.analysis_tools import (
+from uav_surveil.analysis_tools import (  # noqa: E402
     log_cell_coverage_gaps,
     make_simulation_info,
 )
-from uav_surveil.config import load_scenario
-from uav_surveil.gss.simulation import GSSSimulation
+from uav_surveil.config import load_scenario  # noqa: E402
+from uav_surveil.gss.simulation import GSSSimulation  # noqa: E402
 
 # Colormap used for UAV SoC (red = empty, green = full)
 COLORMAP = cm.get_cmap("RdYlGn")
@@ -36,8 +36,8 @@ MAX_UAV_LABELS = 25  # draw labels only for first N UAVs if many
 config = load_scenario("baseline")
 
 # Generate simulation info for consistent file naming
-import datetime
-import os
+import datetime  # noqa: E402
+import os  # noqa: E402
 
 # Ensure simulations directory exists
 os.makedirs("results", exist_ok=True)
@@ -94,8 +94,8 @@ ax.set_xlim(xmin, xmax)
 ax.set_ylim(ymin, ymax)
 ax.set_aspect("equal")
 title_str = (
-    f"Continuous Patrol – {config.config_name} | Algo: {config.optimization.route_algorithm} "
-    f"| Fleet {len(uavs)} UAVs"
+    f"Continuous Patrol – {config.config_name} | "
+    f"Algo: {config.optimization.route_algorithm} | Fleet {len(uavs)} UAVs"
 )
 ax.set_title(title_str)
 
@@ -134,7 +134,7 @@ uav_scatter = ax.scatter(
 )
 
 # Colorbar for SoC scale
-import matplotlib as mpl
+import matplotlib as mpl  # noqa: E402
 
 norm = mpl.colors.Normalize(vmin=0, vmax=1)
 cbar = fig.colorbar(
@@ -221,7 +221,8 @@ def update(frame):
         f"Active {sim.metrics.active_uavs}  Spare {sim.metrics.spare_uavs}  "
         f"Return@{config.battery.soc_return_threshold*100:.0f}%\n"
         f"C2 violations {sim.metrics.stl_c2_violations}  "
-        f"C3: {sim.metrics.c3_missed}/{sim.metrics.c3_alarms} miss  Loop {longest_loop:.0f}s\n"
+        f"C3: {sim.metrics.c3_missed}/{sim.metrics.c3_alarms} miss  "
+        f"Loop {longest_loop:.0f}s\n"
         f"Coverage {sim.metrics.coverage_percentage:4.1f}%  "
         f"Rolling(240s) {sim.metrics.rolling_coverage_avg:4.1f}%"
     )
@@ -350,7 +351,9 @@ except ImportError:
             else:
                 peak_coverage = sim.metrics.coverage_percentage
                 global_avg = sim.metrics.coverage_percentage
-        except Exception as e:  # noqa: BLE001 - diagnostic fallback, must not abort script
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 - diagnostic fallback, must not abort script
             print(f"⚠️  CSV parsing failed: {e}")
             peak_coverage = sim.metrics.coverage_percentage
             global_avg = sim.metrics.coverage_percentage

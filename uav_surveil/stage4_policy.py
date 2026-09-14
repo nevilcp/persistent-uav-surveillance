@@ -108,7 +108,8 @@ def apply_policy(
             if uav.soc <= soc_threshold:
                 if not getattr(uav, "_threshold_logged", False):
                     print(
-                        f"🔋 {uav.id} SoC {uav.soc:.2f} ≤ θ_return {soc_threshold:.2f} at d={distance_to_depot:.0f}m → RTB"
+                        f"🔋 {uav.id} SoC {uav.soc:.2f} ≤ θ_return "
+                        f"{soc_threshold:.2f} at d={distance_to_depot:.0f}m → RTB"
                     )
                     uav._threshold_logged = True
                 # Transition to RTB; the simulation movement logic will act

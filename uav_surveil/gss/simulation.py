@@ -201,11 +201,15 @@ class GSSSimulation:
 
             if use_enhanced and hasattr(fleet_result, "n_rotation"):
                 print(
-                    f"   ✅ Enhanced Fleet: {fleet_result.n_launch} active + {fleet_result.n_rotation} rotation + {fleet_result.n_contingency} contingency = {fleet_result.n_spare} spare"
+                    f"   ✅ Enhanced Fleet: {fleet_result.n_launch} active + "
+                    f"{fleet_result.n_rotation} rotation + "
+                    f"{fleet_result.n_contingency} contingency = "
+                    f"{fleet_result.n_spare} spare"
                 )
             else:
                 print(
-                    f"   ✅ Fleet: {fleet_result.n_launch} active + {fleet_result.n_spare} spare"
+                    f"   ✅ Fleet: {fleet_result.n_launch} active + "
+                    f"{fleet_result.n_spare} spare"
                 )
 
             # Stage 3A: Generate routes
@@ -272,7 +276,8 @@ class GSSSimulation:
                 )
             if route_margins:
                 print(
-                    f"   ✅ All routes battery-feasible, min margin: {min(route_margins):.1f}s"
+                    f"   ✅ All routes battery-feasible, "
+                    f"min margin: {min(route_margins):.1f}s"
                 )
 
             # Stage 3B: Schedule departures
@@ -281,7 +286,8 @@ class GSSSimulation:
             self._t_cyc = schedule_summary.longest_loop_time
             print(f"   ✅ Max loop time: {schedule_summary.longest_loop_time:.1f}s")
             print(
-                f"   📊 n_surge: {schedule_summary.n_surge}, β_adapt: {schedule_summary.β_adapt:.3f}"
+                f"   📊 n_surge: {schedule_summary.n_surge}, "
+                f"β_adapt: {schedule_summary.β_adapt:.3f}"
             )
 
             # Stage 2 (adaptive): Re-optimize with n_surge feedback
@@ -297,14 +303,19 @@ class GSSSimulation:
             )
             if use_enhanced and hasattr(fleet_result_adaptive, "n_rotation"):
                 print(
-                    f"   ✅ Adaptive Fleet: {fleet_result_adaptive.n_launch} active + {fleet_result_adaptive.n_rotation} rotation + {fleet_result_adaptive.n_contingency} contingency = {fleet_result_adaptive.n_spare} spare"
+                    f"   ✅ Adaptive Fleet: {fleet_result_adaptive.n_launch} "
+                    f"active + {fleet_result_adaptive.n_rotation} rotation + "
+                    f"{fleet_result_adaptive.n_contingency} contingency = "
+                    f"{fleet_result_adaptive.n_spare} spare"
                 )
             else:
                 print(
-                    f"   ✅ Adaptive Fleet: {fleet_result_adaptive.n_launch} active + {fleet_result_adaptive.n_spare} spare"
+                    f"   ✅ Adaptive Fleet: {fleet_result_adaptive.n_launch} "
+                    f"active + {fleet_result_adaptive.n_spare} spare"
                 )
             print(
-                f"   📈 Spare ratio: {fleet_result.spare_ratio:.3f} → {fleet_result_adaptive.spare_ratio:.3f}"
+                f"   📈 Spare ratio: {fleet_result.spare_ratio:.3f} → "
+                f"{fleet_result_adaptive.spare_ratio:.3f}"
             )
 
             # Keep the *route count* as the launch target, moving any
@@ -357,7 +368,9 @@ class GSSSimulation:
                                     uav.route_list[0].cell_sequence
                                 )
                                 break
-            except Exception:  # noqa: BLE001 - best-effort lookup, fall back to no orphan route
+            except (
+                Exception
+            ):  # noqa: BLE001 - best-effort lookup, fall back to no orphan route
                 self._failed_route_ids = []
 
             # Log initial route assignments
@@ -396,7 +409,9 @@ class GSSSimulation:
                             for cid in r.cell_sequence:
                                 w.writerow([r.id, cid])
                     print(f"🗂️  Route membership exported: {route_path}")
-            except Exception as _e:  # noqa: BLE001 - optional export, must not abort init
+            except (
+                Exception
+            ) as _e:  # noqa: BLE001 - optional export, must not abort init
                 print(f"⚠️  Route membership export failed: {_e}")
 
             # Determine actual algorithm used (check route IDs)
@@ -427,7 +442,8 @@ class GSSSimulation:
             # Initialize failure manager (no-op when disabled)
             try:
                 self._failure_manager = FailureManager(self)
-            except Exception:  # noqa: BLE001 - keep simulation running even if Stage-5 config incomplete
+            except Exception:  # noqa: BLE001
+                # Keep simulation running even if Stage-5 config incomplete
                 self._failure_manager = None
             # Enable per-UAV SoC logging only for failure scenarios
             self._soc_log_enabled = bool(getattr(self.config.failure, "enabled", False))
@@ -439,7 +455,9 @@ class GSSSimulation:
             # Deliberate feasibility errors (e.g. Stage 0) must propagate to the caller.
             self.state = SimulationState.ERROR
             raise
-        except Exception as e:  # noqa: BLE001 - top-level init guard, reports and fails gracefully
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 - top-level init guard, reports and fails gracefully
             print(f"❌ Simulation initialization failed: {e}")
             self.state = SimulationState.ERROR
             return False
@@ -544,7 +562,9 @@ class GSSSimulation:
 
             return True
 
-        except Exception as e:  # noqa: BLE001 - top-level step guard, reports and fails gracefully
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 - top-level step guard, reports and fails gracefully
             print(f"❌ Simulation step failed: {e}")
             self.state = SimulationState.ERROR
             return False
@@ -775,7 +795,9 @@ class GSSSimulation:
                                 self._launch_spare_for(uav)
                             else:
                                 print(
-                                    f"⏸️  Spare for {uav.id} deferred (progress {uav._waypoint_idx}/{len(uav.route_list[0].cell_sequence)})"
+                                    f"⏸️  Spare for {uav.id} deferred "
+                                    f"(progress {uav._waypoint_idx}/"
+                                    f"{len(uav.route_list[0].cell_sequence)})"
                                 )
                     continue
 
@@ -812,7 +834,9 @@ class GSSSimulation:
                         self._launch_spare_for(uav)
                     else:
                         print(
-                            f"⏸️  Spare for {uav.id} deferred (progress {uav._waypoint_idx}/{len(uav.route_list[0].cell_sequence)})"
+                            f"⏸️  Spare for {uav.id} deferred "
+                            f"(progress {uav._waypoint_idx}/"
+                            f"{len(uav.route_list[0].cell_sequence)})"
                         )
 
         # Evaluate outstanding alarms
@@ -1001,7 +1025,8 @@ class GSSSimulation:
             f"Coverage: {self.metrics.coverage_percentage:.1f}% | "
             f"Active UAVs: {self.metrics.uavs_on_mission}/{len(self.uavs)} | "
             f"Overdue cells: {self.metrics.cells_overdue} | "
-            f"SoC avg: {self.metrics.avg_soc*100:4.0f}% min: {self.metrics.min_soc*100:3.0f}%"
+            f"SoC avg: {self.metrics.avg_soc*100:4.0f}% "
+            f"min: {self.metrics.min_soc*100:3.0f}%"
         )
 
     def _get_next_spare(self) -> UAV | None:
@@ -1056,7 +1081,9 @@ class GSSSimulation:
                     ]
                 )
                 print(
-                    f"⚠️  No rotation spares available for {origin_uav.id} ({rotation_spares}/4 rotation, {contingency_spares}/1 contingency)"
+                    f"⚠️  No rotation spares available for {origin_uav.id} "
+                    f"({rotation_spares}/4 rotation, "
+                    f"{contingency_spares}/1 contingency)"
                 )
             return None
 
@@ -1175,7 +1202,8 @@ class GSSSimulation:
                             f"   🚀 Pre-launched spare {launched_spare.id} for {uav.id}"
                         )
                         print(
-                            f"      ETA to depot: {eta_depot:.0f}s, SoC at depot: {estimated_soc_at_depot:.2f}"
+                            f"      ETA to depot: {eta_depot:.0f}s, "
+                            f"SoC at depot: {estimated_soc_at_depot:.2f}"
                         )
                         return  # Only launch one spare per tick
 
@@ -1197,7 +1225,9 @@ class GSSSimulation:
                 filename = f"results/sim_{route_algo}_{timestamp}_metrics.csv"
 
         try:
-            self._csv_file = open(filename, "w", newline="")  # noqa: SIM115 - kept open for the simulation's lifetime
+            self._csv_file = open(
+                filename, "w", newline=""
+            )  # noqa: SIM115 - kept open for the simulation's lifetime
             self._csv_writer = csv.writer(self._csv_file)
 
             # Write header (includes fleet and orphan telemetry fields)

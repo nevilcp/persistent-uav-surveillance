@@ -54,5 +54,6 @@ class Route:
         )
 
     def get_waypoints(self, cell_lookup: dict) -> list:
-        """Return the list of (x, y) waypoints for this route using a cell lookup dict."""
+        """Return the list of (x, y) waypoints for this route using a cell
+        lookup dict."""
         return [(cell_lookup[cid].x, cell_lookup[cid].y) for cid in self.cell_sequence]

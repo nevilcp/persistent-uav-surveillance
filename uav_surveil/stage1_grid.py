@@ -4,7 +4,6 @@ This module implements the discretization of the surveillance area
 into a grid of cells for coverage optimization.
 """
 
-
 from .config.parameters import SystemParameters
 from .core.cell import Cell
 
@@ -14,7 +13,8 @@ from .core.cell import Cell
 
 
 def build_grid_from_config(config: "SystemParameters") -> list[Cell]:
-    """Convenience wrapper to build a surveillance grid from a *SystemParameters* object.
+    """Convenience wrapper to build a surveillance grid from a
+    *SystemParameters* object.
 
     Args:
         config: Loaded system configuration

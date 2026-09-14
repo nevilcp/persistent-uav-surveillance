@@ -121,7 +121,8 @@ def generate_routes_balanced(
     }
 
     print(
-        f"✅ Balanced routes: max loop {longest_loop:.1f}s, avg {avg_cells_per_route:.1f} cells/route"
+        f"✅ Balanced routes: max loop {longest_loop:.1f}s, "
+        f"avg {avg_cells_per_route:.1f} cells/route"
     )
 
     return route_objects, summary

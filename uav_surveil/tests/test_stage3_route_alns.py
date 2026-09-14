@@ -5,7 +5,8 @@ from uav_surveil.stage3_route_alns import generate_routes_alns
 
 
 def test_alns_loop_time_under_threshold():
-    """Test that ALNS generates routes with loop times under 2x revisit requirement (240s)."""
+    """Test that ALNS generates routes with loop times under 2x revisit
+    requirement (240s)."""
     # Create a 12x12 grid (144 cells) similar to baseline scenario
     cells = []
     for row in range(12):

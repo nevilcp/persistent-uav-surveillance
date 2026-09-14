@@ -255,7 +255,8 @@ def analyze_battery_margin(
 
     Returns:
         required_xi: The battery deficit fraction (0 = feasible).
-        margin_seconds: Time margin (in seconds) between usable battery and required mission duration.
+        margin_seconds: Time margin (in seconds) between usable battery
+            and required mission duration.
         is_safe: True if the mission is feasible and its deficit is within target_xi.
     """
     d_need = 2 * d_ferry + l_grid

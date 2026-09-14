@@ -12,13 +12,13 @@ import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-import copy
+import copy  # noqa: E402
 
-from uav_surveil.config import load_scenario
-from uav_surveil.stage1_grid import build_grid_from_config
-from uav_surveil.stage2_fleet import optimize_fleet_from_config
-from uav_surveil.stage3_route_factory import get_route_generator
-from uav_surveil.stage3_schedule import schedule_from_config
+from uav_surveil.config import load_scenario  # noqa: E402
+from uav_surveil.stage1_grid import build_grid_from_config  # noqa: E402
+from uav_surveil.stage2_fleet import optimize_fleet_from_config  # noqa: E402
+from uav_surveil.stage3_route_factory import get_route_generator  # noqa: E402
+from uav_surveil.stage3_schedule import schedule_from_config  # noqa: E402
 
 
 def test_adaptive_beta_effectiveness():
@@ -44,7 +44,8 @@ def test_adaptive_beta_effectiveness():
         # Stage-2 (initial): Default β = 0.2
         fleet_result_initial = optimize_fleet_from_config(test_config)
         print(
-            f"   Initial (β=0.2): {fleet_result_initial.n_launch} active + {fleet_result_initial.n_spare} spare"
+            f"   Initial (β=0.2): {fleet_result_initial.n_launch} active + "
+            f"{fleet_result_initial.n_spare} spare"
         )
 
         # Stage-3: Generate routes and schedule
@@ -54,7 +55,8 @@ def test_adaptive_beta_effectiveness():
         schedule_summary = schedule_from_config(config, routes)
 
         print(
-            f"   Stage-3B: n_surge={schedule_summary.n_surge}, β_adapt={schedule_summary.β_adapt:.3f}"
+            f"   Stage-3B: n_surge={schedule_summary.n_surge}, "
+            f"β_adapt={schedule_summary.β_adapt:.3f}"
         )
 
         # Stage-2 (adaptive): Use β_adapt
@@ -63,7 +65,9 @@ def test_adaptive_beta_effectiveness():
         fleet_result_adaptive = optimize_fleet_from_config(adaptive_config)
 
         print(
-            f"   Adaptive (β={schedule_summary.β_adapt:.3f}): {fleet_result_adaptive.n_launch} active + {fleet_result_adaptive.n_spare} spare"
+            f"   Adaptive (β={schedule_summary.β_adapt:.3f}): "
+            f"{fleet_result_adaptive.n_launch} active + "
+            f"{fleet_result_adaptive.n_spare} spare"
         )
 
         # Show change

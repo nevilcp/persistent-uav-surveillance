@@ -241,7 +241,9 @@ def _optimize_fleet_size_milp(
 
     try:
         opt.solve(m, tee=False)
-    except Exception:  # noqa: BLE001 - solver backend errors vary, treat any as infeasible
+    except (
+        Exception
+    ):  # noqa: BLE001 - solver backend errors vary, treat any as infeasible
         return None
 
     n_launch = round(value(m.n_L))
