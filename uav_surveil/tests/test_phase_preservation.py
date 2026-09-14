@@ -57,7 +57,7 @@ class TestRelaunchIsPhaseCongruent:
         parent.swap_timer = 1.0
         sim.step()
 
-        assert parent.state == UAVState.SPARE
+        assert parent.state == UAVState.IDLE
         assert parent.phase_offset is not None
         assert sim._t_cyc > 0
         diff = (parent.launch_time - parent.phase_offset) % sim._t_cyc
@@ -76,6 +76,6 @@ class TestRelaunchIsPhaseCongruent:
 
         # The parent must not jump straight back onto the route it just
         # handed to a spare -- it should wait for its own phase slot.
-        assert parent.state == UAVState.SPARE
+        assert parent.state == UAVState.IDLE
         if parent.launch_time not in (float("inf"),):
             assert parent.launch_time >= now_before

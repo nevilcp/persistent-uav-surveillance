@@ -18,14 +18,21 @@ class UAVState(Enum):
     """Operational state of a UAV.
 
     Attributes:
-        SPARE: Parked at depot waiting for assignment.
+        SPARE: Parked at depot, never yet assigned (rotation pool).
         ON_MISSION: Currently executing a surveillance route.
+        RTB: On mission, flying back to depot (returning to base).
         SWAPPING: On pad performing battery hot-swap.
+        IDLE: At depot after a swap, waiting for its own phase slot to
+            relaunch. Distinct from SPARE: reserved for its own route
+            rather than available to cover another UAV's early return.
+        FAILED: Hard failure; frozen in place.
     """
 
     SPARE = "spare"
     ON_MISSION = "on_mission"
+    RTB = "rtb"
     SWAPPING = "swapping"
+    IDLE = "idle"
     FAILED = "failed"
 
 
@@ -79,6 +86,13 @@ class UAV:
         # Ensure state/is_active consistency
         if self.is_active and self.state == UAVState.SPARE:
             self.state = UAVState.ON_MISSION
+
+    @property
+    def _fly_home(self) -> bool:
+        """Read-only alias kept for one release so external readers (e.g.
+        plotting scripts) that still check `_fly_home` keep working; the
+        simulation itself now uses `state == UAVState.RTB` directly."""
+        return self.state == UAVState.RTB
 
     def move_towards(
         self, target_x: float, target_y: float, speed: float, dt: float

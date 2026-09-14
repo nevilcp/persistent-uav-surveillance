@@ -678,15 +678,18 @@ class GSSSimulation:
                             self._cell_claim_times.pop(cell_id, None)
                         delattr(uav, "_previous_route_cells")
 
-                    # Stay SPARE until its own phase slot comes back around
-                    # (a spare is already covering this route at the current
-                    # phase; relaunching immediately would double-cover it).
-                    uav.state = UAVState.SPARE
+                    # IDLE at depot until its own phase slot comes back
+                    # around (a spare is already covering this route at the
+                    # current phase; relaunching immediately would double-
+                    # cover it).
+                    uav.state = UAVState.IDLE
                     uav.is_active = False
                     uav._waypoint_idx = 0
 
                     active_now = sum(
-                        1 for vv in self.uavs if vv.state == UAVState.ON_MISSION
+                        1
+                        for vv in self.uavs
+                        if vv.state in (UAVState.ON_MISSION, UAVState.RTB)
                     )
                     if active_now < self._n_launch_target:
                         if uav.phase_offset is not None:
@@ -701,25 +704,9 @@ class GSSSimulation:
                 continue
 
             # --------------------------------------------------------------
-            # Scheduled launch / activation
+            # RTB: on mission, navigating straight back to depot
             # --------------------------------------------------------------
-            if (
-                uav.state == UAVState.SPARE
-                and not uav.is_active
-                and self.metrics.current_time >= uav.launch_time
-                and uav.launch_time != float("inf")
-            ):
-                uav.is_active = True
-                uav.state = UAVState.ON_MISSION
-
-            # Skip any UAVs that are not currently on mission
-            if uav.state != UAVState.ON_MISSION:
-                continue
-
-            # --------------------------------------------------------------
-            # If UAV is flagged to fly home, navigate to depot
-            # --------------------------------------------------------------
-            if getattr(uav, "_fly_home", False):
+            if uav.state == UAVState.RTB:
                 dist = uav.move_towards(depot[0], depot[1], speed, dt)
                 self._consume_battery(uav, dist)
                 if uav.at_position(depot[0], depot[1]):
@@ -733,7 +720,22 @@ class GSSSimulation:
 
                     # Reset fields for when this UAV becomes spare again
                     uav._waypoint_idx = 0
-                    uav._fly_home = False
+                continue
+
+            # --------------------------------------------------------------
+            # Scheduled launch / activation
+            # --------------------------------------------------------------
+            if (
+                uav.state in (UAVState.SPARE, UAVState.IDLE)
+                and not uav.is_active
+                and self.metrics.current_time >= uav.launch_time
+                and uav.launch_time != float("inf")
+            ):
+                uav.is_active = True
+                uav.state = UAVState.ON_MISSION
+
+            # Skip any UAVs that are not currently on mission
+            if uav.state != UAVState.ON_MISSION:
                 continue
 
             # --------------------------------------------------------------
@@ -756,7 +758,7 @@ class GSSSimulation:
                     else:
                         # Low battery – head home
                         uav._pending_tail = uav._waypoint_idx  # cells after current idx
-                        uav._fly_home = True
+                        uav.state = UAVState.RTB
                         # Raise C3 alarm and attempt spare launch immediately
                         if not getattr(uav, "_alarm_raised", False):
                             uav._alarm_raised = True
@@ -793,20 +795,19 @@ class GSSSimulation:
         soc_threshold = self.config.battery.soc_return_threshold
         for uav in self.uavs:
             if uav.state == UAVState.ON_MISSION and uav.soc <= soc_threshold:
-                # Force return to depot
-                if not getattr(uav, "_fly_home", False):
-                    uav._pending_tail = getattr(uav, "_waypoint_idx", 0)
-                    uav._fly_home = True
-                    if not getattr(uav, "_alarm_raised", False):
-                        uav._alarm_raised = True
-                        uav._alarm_time = self.metrics.current_time
-                        self.metrics.c3_alarms += 1
-                        if self._enough_progress(uav):
-                            self._launch_spare_for(uav)
-                        else:
-                            print(
-                                f"⏸️  Spare for {uav.id} deferred (progress {uav._waypoint_idx}/{len(uav.route_list[0].cell_sequence)})"
-                            )
+                # Force return to depot (state==ON_MISSION already excludes RTB)
+                uav._pending_tail = getattr(uav, "_waypoint_idx", 0)
+                uav.state = UAVState.RTB
+                if not getattr(uav, "_alarm_raised", False):
+                    uav._alarm_raised = True
+                    uav._alarm_time = self.metrics.current_time
+                    self.metrics.c3_alarms += 1
+                    if self._enough_progress(uav):
+                        self._launch_spare_for(uav)
+                    else:
+                        print(
+                            f"⏸️  Spare for {uav.id} deferred (progress {uav._waypoint_idx}/{len(uav.route_list[0].cell_sequence)})"
+                        )
 
         # Evaluate outstanding alarms
         for uav in self.uavs:
@@ -860,7 +861,7 @@ class GSSSimulation:
             # Check if any UAV is observing this cell
             cell.is_covered = False
             for uav in self.uavs:
-                if uav.state == UAVState.ON_MISSION:
+                if uav.state in (UAVState.ON_MISSION, UAVState.RTB):
                     # Use distance-based coverage instead of exact position
                     import math
 
@@ -904,16 +905,18 @@ class GSSSimulation:
         if self._start_time:
             self.metrics.total_runtime = time.time() - self._start_time
 
-        # Count UAV states
+        # Count UAV states. RTB counts as on-mission (still deployed, still
+        # accruing coverage on its way home); IDLE counts with spares (at
+        # depot, just not yet available for ad-hoc reassignment).
         self.metrics.active_uavs = sum(
-            1 for uav in self.uavs if uav.state == UAVState.ON_MISSION
+            1 for uav in self.uavs if uav.state in (UAVState.ON_MISSION, UAVState.RTB)
         )
         self.metrics.uavs_on_mission = self.metrics.active_uavs  # alias for now
         # Count only rotation spares in metrics (contingency spares are separate)
         self.metrics.spare_uavs = sum(
             1
             for uav in self.uavs
-            if uav.state == UAVState.SPARE and not uav.is_contingency
+            if uav.state in (UAVState.SPARE, UAVState.IDLE) and not uav.is_contingency
         )
         self.metrics.uavs_swapping_battery = sum(
             1 for uav in self.uavs if uav.state == UAVState.SWAPPING
@@ -1119,9 +1122,7 @@ class GSSSimulation:
         from ..stage4_policy import get_distance_aware_threshold
 
         for uav in self.uavs:
-            if uav.state == UAVState.ON_MISSION and not getattr(
-                uav, "_fly_home", False
-            ):
+            if uav.state == UAVState.ON_MISSION:
                 # Calculate distance to depot
                 distance_to_depot = math.hypot(uav.x - depot[0], uav.y - depot[1])
 

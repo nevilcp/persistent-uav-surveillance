@@ -342,11 +342,10 @@ class FailureManager:
                 print(f"🗂️  Failure meta exported for orphan analysis")
         except Exception as _e:
             print(f"⚠️  Failure meta export failed: {_e}")
-        # Mark as failed and freeze tail index
+        # Mark as failed and freeze tail index; `_fly_home` (RTB) is
+        # derived from state so this alone stops any RTB motion.
         failed_uav.is_failed = True
         failed_uav.state = UAVState.FAILED
-        # Freeze motion: clear fly_home and route following
-        setattr(failed_uav, "_fly_home", False)
         # Expose ids to sim for selective SoC logging
         self.sim._failed_id = failed_uav.id
         if not hasattr(failed_uav, "_waypoint_idx"):

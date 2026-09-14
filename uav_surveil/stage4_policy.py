@@ -4,9 +4,9 @@ A very lightweight rule engine that decides per-tick UAV actions.
 For the *baseline* architecture it only enforces:
 
 1. Battery return rule – if the State-of-Charge (SoC) of an ON_MISSION UAV
-   falls below ``soc_return_threshold`` from the config, flag the vehicle to
-   fly home (``_fly_home = True``).  The *simulation* loop will then route the
-   UAV back to the depot and trigger a battery swap.
+   falls below ``soc_return_threshold`` from the config, transition it to
+   ``UAVState.RTB``.  The *simulation* loop will then route the UAV back to
+   the depot and trigger a battery swap.
 
 2. Spare-floor rule – ensure at least one SPARE is ready on the pad.  If the
    spare floor is violated we *could* immediately launch a standby UAV, but in
@@ -113,9 +113,9 @@ def apply_policy(
                         f"🔋 {uav.id} SoC {uav.soc:.2f} ≤ θ_return {soc_threshold:.2f} at d={distance_to_depot:.0f}m → RTB"
                     )
                     uav._threshold_logged = True
-                # Flag for immediate return; the simulation movement logic will
-                # act on this flag and navigate home.
-                uav._fly_home = True
+                # Transition to RTB; the simulation movement logic will act
+                # on this state and navigate home.
+                uav.state = UAVState.RTB
 
     # ---------------------------------------------------------------------
     # 2) Spare-floor rule – ensure at least one spare on pad (baseline)
