@@ -13,23 +13,24 @@ and system performance metrics.
 
 from __future__ import annotations
 
-import logging
+import contextlib
+import csv
 import math
 import time
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
-from enum import Enum
-import csv
-import os
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
-import simpy
-
+from ..analysis_tools import (
+    log_cell_coverage_gaps,
+    log_route_analysis,
+    track_uav_routes,
+)
+from ..config.parameters import SystemParameters
 from ..core.cell import Cell
 from ..core.route import Route
 from ..core.uav import UAV, UAVState
-from ..config.config_manager import ConfigManager
-from ..config.parameters import SystemParameters
 from ..stage0_battery import optimize_battery_reserve
 from ..stage1_grid import build_grid_from_config
 from ..stage2_fleet import optimize_fleet_from_config
@@ -37,12 +38,6 @@ from ..stage3_route_factory import get_route_generator
 from ..stage3_schedule import schedule_from_config
 from ..stage4_policy import apply_policy
 from ..stage5_failure import FailureManager
-from ..analysis_tools import (
-    log_route_analysis,
-    log_cell_coverage_gaps,
-    track_uav_routes,
-)
-import numpy as np
 
 
 class SimulationState(Enum):
@@ -71,7 +66,7 @@ class SimulationMetrics:
     worst_cell_age: float = 0.0
 
     # Rolling coverage tracking (240s window)
-    rolling_coverage_window: List[float] = field(default_factory=list)
+    rolling_coverage_window: list[float] = field(default_factory=list)
     rolling_coverage_avg: float = 0.0
     coverage_window_size: int = 240  # 4 minutes rolling window
 
@@ -118,28 +113,28 @@ class GSSSimulation:
     metrics: SimulationMetrics = field(default_factory=SimulationMetrics)
 
     # Core simulation components
-    cells: List[Cell] = field(default_factory=list)
-    uavs: List[UAV] = field(default_factory=list)
-    routes: List[Route] = field(default_factory=list)
+    cells: list[Cell] = field(default_factory=list)
+    uavs: list[UAV] = field(default_factory=list)
+    routes: list[Route] = field(default_factory=list)
 
     # STL contract tracking
     stl_c1_violations: int = 0
     stl_c2_violations: int = 0
     stl_c3_violations: int = 0
-    c3_alarms: List[Dict] = field(default_factory=list)  # Track C3 alarms
+    c3_alarms: list[dict] = field(default_factory=list)  # Track C3 alarms
 
     # Internal tracking
-    _start_time: Optional[float] = None
+    _start_time: float | None = None
     _last_update: float = 0.0
-    cell_lookup: Dict[str, Cell] = field(default_factory=dict)  # Added for cell lookup
-    _failure_manager: Optional[FailureManager] = None
-    _failure_markers: Dict[str, Any] = field(default_factory=dict)
+    cell_lookup: dict[str, Cell] = field(default_factory=dict)  # Added for cell lookup
+    _failure_manager: FailureManager | None = None
+    _failure_markers: dict[str, Any] = field(default_factory=dict)
     _soc_log_enabled: bool = False
-    _soc_log: Dict[str, list] = field(default_factory=dict)
+    _soc_log: dict[str, list] = field(default_factory=dict)
     _quiet_logging: bool = False
     _last_global_no_spare_warning_time: float = 0.0
-    _failed_id: Optional[str] = None
-    _contingency_id: Optional[str] = None
+    _failed_id: str | None = None
+    _contingency_id: str | None = None
     _t_cyc: float = (
         0.0  # T_cyc = longest route loop time; used for phase-preserving relaunch
     )
@@ -238,7 +233,7 @@ class GSSSimulation:
                 furthest_first = getattr(
                     self.config.optimization, "furthest_first", False
                 )
-                self.routes, route_summary = route_fn(
+                self.routes, _route_summary = route_fn(
                     self.cells,
                     fleet_result.n_launch,
                     self.config.uav.cruise_speed,
@@ -247,7 +242,7 @@ class GSSSimulation:
                     buse_s=self.config.battery.usable_endurance,
                 )
             else:
-                self.routes, route_summary = route_fn(
+                self.routes, _route_summary = route_fn(
                     self.cells,
                     fleet_result.n_launch,
                     self.config.uav.cruise_speed,
@@ -373,7 +368,7 @@ class GSSSimulation:
                                     uav.route_list[0].cell_sequence
                                 )
                                 break
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort lookup, fall back to no orphan route
                 self._failed_route_ids = []
 
             # Debug: Log initial route assignments
@@ -398,7 +393,8 @@ class GSSSimulation:
 
             # Export route membership for failure/orphan analysis
             try:
-                import os, csv as _csv
+                import csv as _csv
+                import os
 
                 os.makedirs("results", exist_ok=True)
                 if hasattr(self, "_simulation_info") and self._simulation_info:
@@ -411,7 +407,7 @@ class GSSSimulation:
                             for cid in r.cell_sequence:
                                 w.writerow([r.id, cid])
                     print(f"🗂️  Route membership exported: {route_path}")
-            except Exception as _e:
+            except Exception as _e:  # noqa: BLE001 - optional export, must not abort init
                 print(f"⚠️  Route membership export failed: {_e}")
 
             # 🔍 ANALYSIS: Route analysis after generation
@@ -443,8 +439,7 @@ class GSSSimulation:
             # Initialize failure manager (no-op when disabled)
             try:
                 self._failure_manager = FailureManager(self)
-            except Exception as _e:
-                # Keep simulation running even if Stage-5 config incomplete
+            except Exception:  # noqa: BLE001 - keep simulation running even if Stage-5 config incomplete
                 self._failure_manager = None
             # Enable per-UAV SoC logging only for failure scenarios
             self._soc_log_enabled = bool(getattr(self.config.failure, "enabled", False))
@@ -456,7 +451,7 @@ class GSSSimulation:
             # Deliberate feasibility errors (e.g. Stage 0) must propagate to the caller.
             self.state = SimulationState.ERROR
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level init guard, reports and fails gracefully
             print(f"❌ Simulation initialization failed: {e}")
             self.state = SimulationState.ERROR
             return False
@@ -495,22 +490,21 @@ class GSSSimulation:
             self._log_csv_metrics()
 
             # Optional per-UAV SoC logging for failure analysis
-            if self._soc_log_enabled:
-                # Log SoC every 5s only for contingency + bridging neighbors
-                if int(self.metrics.current_time) % 5 == 0:
-                    t_now = self.metrics.current_time
-                    selected_ids = set()
-                    if self._contingency_id:
-                        selected_ids.add(self._contingency_id)
-                    if self._failed_id:
-                        for u in self.uavs:
-                            if u.temp_assignments.get(self._failed_id, 0) > 0:
-                                selected_ids.add(u.id)
+            # Log SoC every 5s only for contingency + bridging neighbors
+            if self._soc_log_enabled and int(self.metrics.current_time) % 5 == 0:
+                t_now = self.metrics.current_time
+                selected_ids = set()
+                if self._contingency_id:
+                    selected_ids.add(self._contingency_id)
+                if self._failed_id:
                     for u in self.uavs:
-                        if u.id in selected_ids:
-                            if u.id not in self._soc_log:
-                                self._soc_log[u.id] = []
-                            self._soc_log[u.id].append((t_now, u.soc))
+                        if u.temp_assignments.get(self._failed_id, 0) > 0:
+                            selected_ids.add(u.id)
+                for u in self.uavs:
+                    if u.id in selected_ids:
+                        if u.id not in self._soc_log:
+                            self._soc_log[u.id] = []
+                        self._soc_log[u.id].append((t_now, u.soc))
 
             # 🔍 ANALYSIS: Coverage gap snapshots at configurable cadence
             snapshot_period = 600.0
@@ -524,7 +518,7 @@ class GSSSimulation:
                     snapshot_period = float(
                         getattr(self.config.stl, "snapshot_period_s", 600.0)
                     )
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 snapshot_period = 600.0
             if (
                 self.metrics.current_time > 0
@@ -535,7 +529,8 @@ class GSSSimulation:
                 filename = None
                 if hasattr(self, "_simulation_info") and self._simulation_info:
                     info = self._simulation_info
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    # Local-time filename stamp, not a tz-sensitive calculation.
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
                     filename = (
                         f"results/{info['base_name']}_coverage_gaps_{timestamp}.csv"
                     )
@@ -550,7 +545,7 @@ class GSSSimulation:
                 uav_filename = None
                 if hasattr(self, "_simulation_info") and self._simulation_info:
                     info = self._simulation_info
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
                     uav_filename = (
                         f"results/{info['base_name']}_uav_routes_{timestamp}.csv"
                     )
@@ -561,7 +556,7 @@ class GSSSimulation:
 
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level step guard, reports and fails gracefully
             print(f"❌ Simulation step failed: {e}")
             self.state = SimulationState.ERROR
             return False
@@ -835,14 +830,16 @@ class GSSSimulation:
         # Evaluate outstanding alarms
         deadline = self.config.stl.spare_launch_deadline
         for uav in self.uavs:
-            if getattr(uav, "_alarm_raised", False):
-                # considered satisfied if a spare launched within the deadline
-                if self.metrics.current_time - uav._alarm_time > deadline:
-                    # find any spare launched corresponding? If not already marked missed
-                    if not getattr(uav, "_alarm_checked", False):
-                        self.metrics.c3_missed += 1
-                        uav._alarm_checked = True
-                        uav._alarm_raised = False
+            # considered satisfied if a spare launched within the deadline
+            if (
+                getattr(uav, "_alarm_raised", False)
+                and self.metrics.current_time - uav._alarm_time > deadline
+                # find any spare launched corresponding? If not already marked missed
+                and not getattr(uav, "_alarm_checked", False)
+            ):
+                self.metrics.c3_missed += 1
+                uav._alarm_checked = True
+                uav._alarm_raised = False
 
     # ---------------------------------------------------------------------
     # Battery helper
@@ -923,7 +920,6 @@ class GSSSimulation:
                 self.metrics.stl_c2_violations += 1
 
         # C-4: Orphan recovery violations
-        pass
 
     def _update_metrics(self) -> None:
         """Update real-time performance metrics."""
@@ -991,7 +987,7 @@ class GSSSimulation:
             ) / len(self.metrics.rolling_coverage_window)
 
         # --- Orphan telemetry (if failure scenario and failed route known)
-        try:
+        with contextlib.suppress(Exception):
             orphan_ids = getattr(self, "_failed_route_ids", None)
             if orphan_ids:
                 theta = float(getattr(self.config.stl, "max_revisit_gap", 180.0))
@@ -1010,8 +1006,6 @@ class GSSSimulation:
                     self.metrics.orphan_coverage_pct = float(
                         (total - self.metrics.orphan_overdue_count) / total * 100.0
                     )
-        except Exception:
-            pass
 
     def _print_status(self) -> None:
         """Print current simulation status."""
@@ -1023,7 +1017,7 @@ class GSSSimulation:
             f"SoC avg: {self.metrics.avg_soc*100:4.0f}% min: {self.metrics.min_soc*100:3.0f}%"
         )
 
-    def _get_next_spare(self) -> Optional[UAV]:
+    def _get_next_spare(self) -> UAV | None:
         """Retrieve the next spare UAV ready for launch.
 
         Returns:
@@ -1149,6 +1143,7 @@ class GSSSimulation:
         before reaching depot, preventing coverage gaps.
         """
         import math
+
         from ..stage4_policy import get_distance_aware_threshold
 
         for uav in self.uavs:
@@ -1179,29 +1174,27 @@ class GSSSimulation:
                 )
 
                 # Pre-launch if UAV will hit threshold before depot or just after
+                # (only once there's enough progress to launch a spare)
                 if (
                     estimated_soc_at_depot
                     <= threshold + self.config.battery.prelaunch_margin
                     and distance_to_depot > 200.0  # Don't pre-launch if very close
                     and not getattr(uav, "_prelaunch_triggered", False)
+                    and self._enough_progress(uav)
                 ):
+                    launched_spare = self._launch_spare_for(uav)
+                    if launched_spare:
+                        uav._prelaunch_triggered = True
+                        print(
+                            f"   🚀 Pre-launched spare {launched_spare.id} for {uav.id}"
+                        )
+                        print(
+                            f"      ETA to depot: {eta_depot:.0f}s, SoC at depot: {estimated_soc_at_depot:.2f}"
+                        )
+                        return  # Only launch one spare per tick
 
-                    # Launch spare immediately
-                    if self._enough_progress(uav):
-                        launched_spare = self._launch_spare_for(uav)
-                        if launched_spare:
-                            uav._prelaunch_triggered = True
-                            print(
-                                f"   🚀 Pre-launched spare {launched_spare.id} for {uav.id}"
-                            )
-                            print(
-                                f"      ETA to depot: {eta_depot:.0f}s, SoC at depot: {estimated_soc_at_depot:.2f}"
-                            )
-                            return  # Only launch one spare per tick
-
-    def _init_csv_logging(self, filename: str = None) -> None:
+    def _init_csv_logging(self, filename: str | None = None) -> None:
         """Initialize CSV logging for simulation metrics."""
-        import csv
         import datetime
 
         if filename is None:
@@ -1211,12 +1204,14 @@ class GSSSimulation:
                 filename = f"results/{info['base_name']}_metrics.csv"
             else:
                 # Fallback to old behavior
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.datetime.now().strftime(  # noqa: DTZ005
+                    "%Y%m%d_%H%M%S"
+                )
                 route_algo = self.config.optimization.route_algorithm
                 filename = f"results/sim_{route_algo}_{timestamp}_metrics.csv"
 
         try:
-            self._csv_file = open(filename, "w", newline="")
+            self._csv_file = open(filename, "w", newline="")  # noqa: SIM115 - kept open for the simulation's lifetime
             self._csv_writer = csv.writer(self._csv_file)
 
             # Write header (includes new fleet and orphan telemetry fields)
@@ -1243,7 +1238,7 @@ class GSSSimulation:
                 ]
             )
             print(f"📊 CSV logging enabled: {filename}")
-        except Exception as e:
+        except OSError as e:
             print(f"⚠️  CSV logging failed: {e}")
 
     def _log_csv_metrics(self) -> None:
@@ -1275,10 +1270,8 @@ class GSSSimulation:
             if int(self.metrics.current_time) % 60 == 0:
                 self._csv_file.flush()
             # Reset per-tick counters
-            try:
+            with contextlib.suppress(Exception):
                 self.metrics.bridge_inserts_count = 0
-            except Exception:
-                pass
 
         # When failure is enabled and we reached end, emit recovery metrics CSVs
         self._export_failure_recovery_csvs()
@@ -1295,11 +1288,11 @@ class GSSSimulation:
             and hasattr(self, "_simulation_info")
             and self._simulation_info
         ):
-            try:
+            with contextlib.suppress(Exception):
                 base = self._simulation_info["base_name"]
                 # Recovery metrics: min coverage after failure and time under 90%
-                import os
                 import csv as _csv
+                import os
 
                 metrics_path = f"results/{base}_recovery_metrics.csv"
                 # Attempt to compute from existing rolling window/history
@@ -1393,9 +1386,7 @@ class GSSSimulation:
                                     row.append("")
                             if t_val is not None:
                                 w.writerow([f"{t_val:.0f}"] + row)
-            except Exception as _e:
-                pass
 
 
 # Export main classes
-__all__ = ["GSSSimulation", "SimulationState", "SimulationMetrics"]
+__all__ = ["GSSSimulation", "SimulationMetrics", "SimulationState"]

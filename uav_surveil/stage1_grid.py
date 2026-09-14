@@ -4,18 +4,17 @@ This module implements the discretization of the surveillance area
 into a grid of cells for coverage optimization.
 """
 
-from typing import List, Tuple
-from .core.cell import Cell
 
 # New import for convenient config integration
 from .config.parameters import SystemParameters
+from .core.cell import Cell
 
 # ------------------------------------------------------------
 # Public helper – build grid directly from a SystemParameters
 # ------------------------------------------------------------
 
 
-def build_grid_from_config(config: "SystemParameters") -> List[Cell]:
+def build_grid_from_config(config: "SystemParameters") -> list[Cell]:
     """Convenience wrapper to build a surveillance grid from a *SystemParameters* object.
 
     Args:
@@ -37,8 +36,8 @@ def build_grid_from_config(config: "SystemParameters") -> List[Cell]:
 
 # Re-export for easy wildcard import (flake8: disable=F401)
 __all__ = [
-    "build_surveillance_grid",
     "build_grid_from_config",
+    "build_surveillance_grid",
     "validate_grid_coverage",
 ]
 
@@ -47,8 +46,8 @@ def build_surveillance_grid(
     area_width: float,
     area_length: float,
     cell_size: float = 40.0,
-    origin: Tuple[float, float] = (0.0, 0.0),
-) -> List[Cell]:
+    origin: tuple[float, float] = (0.0, 0.0),
+) -> list[Cell]:
     """Build a regular grid of surveillance cells over the area.
 
     Discretizes the rectangular surveillance area into square cells
@@ -97,7 +96,7 @@ def build_surveillance_grid(
 
 
 def validate_grid_coverage(
-    cells: List[Cell], area_width: float, area_length: float
+    cells: list[Cell], area_width: float, area_length: float
 ) -> bool:
     """Validate that grid cells provide complete area coverage.
 

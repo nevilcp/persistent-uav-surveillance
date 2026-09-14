@@ -10,27 +10,28 @@ Disabled by default via config.failure.enabled.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .core.uav import UAV, UAVState
 
 if TYPE_CHECKING:
-    from .gss.simulation import GSSSimulation
     from .core.cell import Cell
+    from .gss.simulation import GSSSimulation
 
 
 @dataclass
 class FailureTrigger:
     kind: str
-    uav_id: Optional[str] = None
-    t_s: Optional[float] = None
-    x: Optional[float] = None
-    y: Optional[float] = None
-    soc_threshold: Optional[float] = None
+    uav_id: str | None = None
+    t_s: float | None = None
+    x: float | None = None
+    y: float | None = None
+    soc_threshold: float | None = None
     fired_once: bool = False
 
-    def check(self, sim: "GSSSimulation") -> bool:
+    def check(self, sim: GSSSimulation) -> bool:
         if self.fired_once:
             return False
         if self.kind == "time" and self.t_s is not None and self.uav_id is not None:
@@ -55,7 +56,7 @@ class FailureTrigger:
             return u is not None and u.soc <= float(self.soc_threshold)
         return False
 
-    def _u(self, sim: "GSSSimulation") -> Optional[UAV]:
+    def _u(self, sim: GSSSimulation) -> UAV | None:
         for u in sim.uavs:
             if u.id == self.uav_id:
                 return u
@@ -65,13 +66,13 @@ class FailureTrigger:
 class BridgeManager:
     """Stage-5a bridging logic (bounded greedy k-NN with micro-guards)."""
 
-    def __init__(self, sim: "GSSSimulation") -> None:
+    def __init__(self, sim: GSSSimulation) -> None:
         self.sim = sim
         self.enabled: bool = False
-        self.failed_id: Optional[str] = None
+        self.failed_id: str | None = None
         self.last_tick_time: float = 0.0
-        self._assigned_cells: Dict[str, set[str]] = {}  # failed_id -> set(cell_id)
-        self._events_path: Optional[str] = None
+        self._assigned_cells: dict[str, set[str]] = {}  # failed_id -> set(cell_id)
+        self._events_path: str | None = None
 
     def enable(self, failed_id: str) -> None:
         self.enabled = True
@@ -199,12 +200,10 @@ class BridgeManager:
             self.sim._claimed_cells.add(cell.id)
             self.sim._cell_claim_times[cell.id] = now
             # Telemetry increments
-            try:
+            with contextlib.suppress(Exception):
                 self.sim.metrics.bridge_inserts_count += 1
-            except Exception:
-                pass
             # Event log
-            try:
+            with contextlib.suppress(Exception):
                 if self._events_path:
                     import csv as _csv
 
@@ -218,8 +217,6 @@ class BridgeManager:
                                 f"cell={cell.id}",
                             ]
                         )
-            except Exception:
-                pass
 
             # Stop early if contingency is close
             if self._eta_contingency(failed_id) <= cfg.realloc_horizon_s:
@@ -228,7 +225,7 @@ class BridgeManager:
     # ------------------------------------------------------------------
     # Orphan tracking util methods
     # ------------------------------------------------------------------
-    def _get_orphan_cells(self, failed_id: str) -> List["Cell"]:
+    def _get_orphan_cells(self, failed_id: str) -> list[Cell]:
         # Build orphan list as the failed UAV's remaining loop from failure tail index
         failed = next((u for u in self.sim.uavs if u.id == failed_id), None)
         if failed is None or not failed.route_list:
@@ -268,7 +265,7 @@ class BridgeManager:
 class FailureManager:
     """Stage-5 orchestrator for failure handling and takeover/bridge."""
 
-    def __init__(self, sim: "GSSSimulation") -> None:
+    def __init__(self, sim: GSSSimulation) -> None:
         self.sim = sim
         cfg = sim.config.failure
         self.enabled = bool(getattr(cfg, "enabled", False))
@@ -322,7 +319,8 @@ class FailureManager:
         self.sim._failure_markers["t_fail"] = self.sim.metrics.current_time
         # Export failure meta and failed-route cell list for exact orphan analysis
         try:
-            import os, csv as _csv
+            import csv as _csv
+            import os
 
             os.makedirs("results", exist_ok=True)
             if hasattr(self.sim, "_simulation_info") and self.sim._simulation_info:
@@ -339,8 +337,8 @@ class FailureManager:
                         w.writerow(["cell_id"])
                         for cid in failed_uav.route_list[0].cell_sequence:
                             w.writerow([cid])
-                print(f"🗂️  Failure meta exported for orphan analysis")
-        except Exception as _e:
+                print("🗂️  Failure meta exported for orphan analysis")
+        except Exception as _e:  # noqa: BLE001 - optional export, must not abort failure handling
             print(f"⚠️  Failure meta export failed: {_e}")
         # Mark as failed and freeze tail index; `_fly_home` (RTB) is
         # derived from state so this alone stops any RTB motion.
@@ -352,7 +350,7 @@ class FailureManager:
             failed_uav._waypoint_idx = 0
         failed_uav.tail_index_at_failure = int(failed_uav._waypoint_idx)
         # Orphan remaining segment: we simply note the remaining cells from route_list[0]
-        orphan_cells: List[str] = []
+        orphan_cells: list[str] = []
         if failed_uav.route_list:
             seq = failed_uav.route_list[0].cell_sequence
             idx = failed_uav.tail_index_at_failure or 0
@@ -383,7 +381,7 @@ class FailureManager:
         # Enable bridge mode until contingency is near or inside horizon
         self.bridge.enable(failed_uav.id)
         # Emit events for trigger/promotion
-        try:
+        with contextlib.suppress(Exception):
             path = getattr(self.sim, "_events_path", None)
             if path:
                 import csv as _csv
@@ -406,8 +404,6 @@ class FailureManager:
                             "",
                         ]
                     )
-        except Exception:
-            pass
         print(
             f"🛑 FAILURE: UAV {failed_uav.id} at t={self.sim.metrics.current_time:.0f}s → freezing & reallocating"
         )
@@ -438,7 +434,7 @@ class FailureManager:
             f"✅ HANDOVER COMPLETE at t={self.sim.metrics.current_time:.0f}s – neighbors reverted, steady state resumed (16+4+0)"
         )
         # Log event
-        try:
+        with contextlib.suppress(Exception):
             path = getattr(self.sim, "_events_path", None)
             if path:
                 import csv as _csv
@@ -453,10 +449,8 @@ class FailureManager:
                             "handover_complete",
                         ]
                     )
-        except Exception:
-            pass
 
-    def _get_uav(self, uav_id: Optional[str]) -> Optional[UAV]:
+    def _get_uav(self, uav_id: str | None) -> UAV | None:
         if uav_id is None:
             return None
         for u in self.sim.uavs:
@@ -464,7 +458,7 @@ class FailureManager:
                 return u
         return None
 
-    def _promote_contingency(self) -> Optional[UAV]:
+    def _promote_contingency(self) -> UAV | None:
         # Find spare with is_contingency True
         for u in self.sim.uavs:
             if u.state == UAVState.SPARE and u.is_contingency:

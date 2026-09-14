@@ -16,13 +16,14 @@ fallback is included to avoid dependency issues.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import glob
 import json
 import math
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
 
 import matplotlib
 
@@ -46,11 +47,11 @@ def _try_read_pandas(path: str):
         import pandas as pd  # type: ignore
 
         return pd.read_csv(path)
-    except Exception:
+    except Exception:  # noqa: BLE001 - pandas missing or CSV unreadable, fall back to manual parsing
         return None
 
 
-def read_metrics_csv(path: str) -> Dict[str, np.ndarray]:
+def read_metrics_csv(path: str) -> dict[str, np.ndarray]:
     """Read metrics.csv into a dict of numpy arrays with numeric types.
 
     Expected header (as written by visualize_simulation):
@@ -68,7 +69,7 @@ def read_metrics_csv(path: str) -> Dict[str, np.ndarray]:
     # Fallback to csv module
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
-        cols: Dict[str, List[float]] = {}
+        cols: dict[str, list[float]] = {}
         for row in reader:
             for k, v in row.items():
                 key = k.strip().lower()
@@ -76,13 +77,13 @@ def read_metrics_csv(path: str) -> Dict[str, np.ndarray]:
                     cols[key] = []
                 try:
                     cols[key].append(float(v))
-                except Exception:
+                except (ValueError, TypeError):
                     # treat empty/malformed as nan
                     cols[key].append(float("nan"))
     return {k: np.asarray(v, dtype=float) for k, v in cols.items()}
 
 
-def read_soc_timeseries(path: str) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+def read_soc_timeseries(path: str) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     """Read SoC time series exported by the simulation (time + columns per UAV).
 
     Returns:
@@ -100,27 +101,27 @@ def read_soc_timeseries(path: str) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
         reader = csv.reader(f)
         header = next(reader)
         ids = [h.strip() for h in header[1:]]
-        times: List[float] = []
-        data: Dict[str, List[float]] = {uid: [] for uid in ids}
+        times: list[float] = []
+        data: dict[str, list[float]] = {uid: [] for uid in ids}
         for row in reader:
             if not row:
                 continue
             try:
                 t = float(row[0])
-            except Exception:
+            except (ValueError, TypeError):
                 continue
             times.append(t)
             for uid, val in zip(ids, row[1:]):
                 try:
                     data[uid].append(float(val))
-                except Exception:
+                except (ValueError, TypeError):
                     data[uid].append(float("nan"))
     return np.asarray(times, dtype=float), {
         k: np.asarray(v, dtype=float) for k, v in data.items()
     }
 
 
-def read_coverage_snapshot(path: str) -> Dict[str, np.ndarray]:
+def read_coverage_snapshot(path: str) -> dict[str, np.ndarray]:
     """Read a coverage_gaps CSV snapshot exported at a given sim time.
 
     Returns dict with arrays for 'age' and 'overdue' (0/1).
@@ -133,14 +134,14 @@ def read_coverage_snapshot(path: str) -> Dict[str, np.ndarray]:
         age = df.get("age", 0).astype(float).to_numpy()
         return {"age": age, "overdue": overdue}
 
-    ages: List[float] = []
-    overdue: List[float] = []
+    ages: list[float] = []
+    overdue: list[float] = []
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             try:
                 ages.append(float(row.get("age", "nan")))
-            except Exception:
+            except (ValueError, TypeError):
                 ages.append(float("nan"))
             try:
                 overdue.append(
@@ -148,7 +149,7 @@ def read_coverage_snapshot(path: str) -> Dict[str, np.ndarray]:
                     if row.get("overdue", "False").strip().lower() == "true"
                     else 0.0
                 )
-            except Exception:
+            except (ValueError, TypeError):
                 overdue.append(float("nan"))
     return {
         "age": np.asarray(ages, dtype=float),
@@ -162,9 +163,9 @@ def read_coverage_snapshot(path: str) -> Dict[str, np.ndarray]:
 
 
 def plot_coverage_time(
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     out_png: str,
-    annotations: Optional[Dict[str, float]] = None,
+    annotations: dict[str, float] | None = None,
     y_tick_step: int = 5,
     show_global_avg: bool = True,
 ) -> None:
@@ -221,7 +222,7 @@ def plot_coverage_time(
     plt.close()
 
 
-def plot_violations_time(metrics: Dict[str, np.ndarray], out_png: str) -> None:
+def plot_violations_time(metrics: dict[str, np.ndarray], out_png: str) -> None:
     t = metrics.get("time")
     overdue = metrics.get("cells_overdue")
     if t is None or overdue is None:
@@ -239,7 +240,7 @@ def plot_violations_time(metrics: Dict[str, np.ndarray], out_png: str) -> None:
 
 
 def plot_compare_coverage(
-    metrics_list: Sequence[Dict[str, np.ndarray]],
+    metrics_list: Sequence[dict[str, np.ndarray]],
     labels: Sequence[str],
     out_png: str,
     y_tick_step: int = 5,
@@ -269,7 +270,7 @@ def _rolling_mean(y: np.ndarray, t: np.ndarray, window_s: float) -> np.ndarray:
         return y
     # Estimate sampling period (default 1s)
     dt = np.nanmedian(np.diff(t)) if len(t) > 1 else 1.0
-    win = max(1, int(round(window_s / max(dt, 1e-6))))
+    win = max(1, round(window_s / max(dt, 1e-6)))
     if win <= 1:
         return y
     # NaN-safe convolution
@@ -283,7 +284,7 @@ def _rolling_mean(y: np.ndarray, t: np.ndarray, window_s: float) -> np.ndarray:
 
 
 def plot_compare_coverage_clean(
-    metrics_list: Sequence[Dict[str, np.ndarray]],
+    metrics_list: Sequence[dict[str, np.ndarray]],
     labels: Sequence[str],
     out_png: str,
     smooth_s: float = 60.0,
@@ -328,7 +329,7 @@ def plot_compare_coverage_clean(
 
 
 def plot_compare_violations_clean(
-    metrics_list: Sequence[Dict[str, np.ndarray]],
+    metrics_list: Sequence[dict[str, np.ndarray]],
     labels: Sequence[str],
     out_png: str,
     smooth_s: float = 60.0,
@@ -371,7 +372,7 @@ def plot_compare_violations_clean(
 
 
 def plot_compare_violations(
-    metrics_list: Sequence[Dict[str, np.ndarray]], labels: Sequence[str], out_png: str
+    metrics_list: Sequence[dict[str, np.ndarray]], labels: Sequence[str], out_png: str
 ) -> None:
     plt.figure(figsize=(9, 3.5))
 
@@ -403,7 +404,7 @@ def plot_compare_violations(
     plt.close()
 
 
-def summarize_metrics(metrics: Dict[str, np.ndarray]) -> Dict[str, float]:
+def summarize_metrics(metrics: dict[str, np.ndarray]) -> dict[str, float]:
     t = metrics.get("time")
     cov = metrics.get("coverage_%")
     if t is None or cov is None or len(t) == 0:
@@ -417,7 +418,7 @@ def summarize_metrics(metrics: Dict[str, np.ndarray]) -> Dict[str, float]:
     return {"avg": avg, "peak": peak, "time_ge_90": time_ge_90}
 
 
-def _count_overdue_in_snapshot(path: Optional[str]) -> Optional[int]:
+def _count_overdue_in_snapshot(path: str | None) -> int | None:
     if not path:
         return None
     try:
@@ -434,7 +435,7 @@ def _count_overdue_in_snapshot(path: Optional[str]) -> Optional[int]:
                 if val == "true":
                     cnt += 1
         return cnt
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort CSV read, missing/malformed file falls back to None
         return None
 
 
@@ -457,7 +458,7 @@ def plot_comparison_table(arts: Sequence[RunArtifacts], out_png: str) -> None:
             ]
         )
 
-    fig, ax = plt.subplots(figsize=(8, 1 + 0.4 * len(rows)))
+    _fig, ax = plt.subplots(figsize=(8, 1 + 0.4 * len(rows)))
     ax.axis("off")
     col_labels = ["Run", "Avg %", "Peak %", "Time ≥90% (s)", "Final overdue"]
     table = ax.table(cellText=rows, colLabels=col_labels, loc="center")
@@ -470,7 +471,7 @@ def plot_comparison_table(arts: Sequence[RunArtifacts], out_png: str) -> None:
     plt.close()
 
 
-def plot_fleet_state(metrics: Dict[str, np.ndarray], out_png: str) -> None:
+def plot_fleet_state(metrics: dict[str, np.ndarray], out_png: str) -> None:
     t = metrics.get("time")
     active = metrics.get("active_uavs")
     swap = metrics.get("swapping_uavs")
@@ -491,13 +492,11 @@ def plot_fleet_state(metrics: Dict[str, np.ndarray], out_png: str) -> None:
     plt.ylabel("UAV count")
     plt.title("Fleet state over time")
     plt.legend(loc="upper right")
-    try:
+    with contextlib.suppress(Exception):
         from matplotlib.ticker import MaxNLocator
 
         ax = plt.gca()
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    except Exception:
-        pass
     plt.grid(True, alpha=0.2)
     _ensure_dir(os.path.dirname(out_png))
     plt.tight_layout()
@@ -505,7 +504,7 @@ def plot_fleet_state(metrics: Dict[str, np.ndarray], out_png: str) -> None:
     plt.close()
 
 
-def _read_uav_routes_csv(path: str) -> Tuple[float, List[Tuple[str, str]]]:
+def _read_uav_routes_csv(path: str) -> tuple[float, list[tuple[str, str]]]:
     """Lightweight reader for a single UAV routes snapshot CSV.
 
     Returns:
@@ -519,7 +518,7 @@ def _read_uav_routes_csv(path: str) -> Tuple[float, List[Tuple[str, str]]]:
         # Expect first column to be time, and columns 'uav_id','state'
         try:
             tval = float(df.iloc[0, 0]) if len(df) else float("nan")
-        except Exception:
+        except (ValueError, TypeError):
             tval = float("nan")
         pairs = [
             (str(r["uav_id"]).strip(), str(r["state"]).strip().lower())
@@ -531,14 +530,14 @@ def _read_uav_routes_csv(path: str) -> Tuple[float, List[Tuple[str, str]]]:
     import csv as _csv
 
     tval = float("nan")
-    pairs: List[Tuple[str, str]] = []
+    pairs: list[tuple[str, str]] = []
     with open(path, newline="") as f:
         rdr = _csv.DictReader(f)
         for i, row in enumerate(rdr):
             if i == 0:
                 try:
                     tval = float(row.get("time", "nan"))
-                except Exception:
+                except (ValueError, TypeError):
                     tval = float("nan")
             uid = str(row.get("uav_id", "")).strip()
             st = str(row.get("state", "")).strip().lower()
@@ -546,19 +545,17 @@ def _read_uav_routes_csv(path: str) -> Tuple[float, List[Tuple[str, str]]]:
     return tval, pairs
 
 
-def _infer_contingency_ids_from_snapshot(pairs: List[Tuple[str, str]]) -> List[str]:
+def _infer_contingency_ids_from_snapshot(pairs: list[tuple[str, str]]) -> list[str]:
     """Heuristic: treat the highest-numbered UAV id(s) that are spares as contingency.
 
     Works with our numbering where rotation spares follow active, and the final id(s)
     are contingency. For single-contingency setups this returns a one-element list.
     """
     # Extract numeric ids when possible
-    nums: List[int] = []
+    nums: list[int] = []
     for uid, _ in pairs:
-        try:
+        with contextlib.suppress(Exception):
             nums.append(int(uid))
-        except Exception:
-            pass
     if not nums:
         return []
     max_id = str(max(nums))
@@ -567,9 +564,9 @@ def _infer_contingency_ids_from_snapshot(pairs: List[Tuple[str, str]]) -> List[s
 
 def plot_fleet_state_with_contingency(
     base_tag: str,
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     out_png: str,
-    annotate_fail: Optional[Dict[str, float]] = None,
+    annotate_fail: dict[str, float] | None = None,
 ) -> None:
     """Stacked fleet state including a separate band for contingency spares.
 
@@ -594,12 +591,12 @@ def plot_fleet_state_with_contingency(
         return plot_fleet_state(metrics, out_png)
 
     # Determine contingency id(s) from the earliest snapshot
-    t0, pairs0 = _read_uav_routes_csv(routes[0])
+    _t0, pairs0 = _read_uav_routes_csv(routes[0])
     cont_ids = _infer_contingency_ids_from_snapshot(pairs0)
 
     # Build step series for contingency spare count at snapshot times
-    t_snap: List[float] = []
-    c_snap: List[int] = []
+    t_snap: list[float] = []
+    c_snap: list[int] = []
     for p in routes:
         ts, pairs = _read_uav_routes_csv(p)
         if ts is None or (isinstance(ts, float) and (np.isnan(ts) or np.isinf(ts))):
@@ -623,8 +620,7 @@ def plot_fleet_state_with_contingency(
     c_series = np.zeros_like(t, dtype=float)
     for i, ti in enumerate(t):
         j = int(np.searchsorted(t_snap_np, ti, side="right") - 1)
-        if j < 0:
-            j = 0
+        j = max(j, 0)
         c_series[i] = c_snap_np[j]
 
     # Rotation spares are exactly what's in metrics (contingency already excluded)
@@ -672,12 +668,10 @@ def plot_fleet_state_with_contingency(
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("UAV count")
     ax.set_title("Fleet state over time (with contingency)")
-    try:
+    with contextlib.suppress(Exception):
         from matplotlib.ticker import MaxNLocator
 
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    except Exception:
-        pass
     ax.legend(loc="upper right", ncol=2)
     ax.grid(True, alpha=0.2)
     _ensure_dir(os.path.dirname(out_png))
@@ -687,7 +681,7 @@ def plot_fleet_state_with_contingency(
 
 
 def plot_coverage_time_with_band(
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     out_png: str,
     steady_start_s: float = 600.0,
     q_lo: float = 10.0,
@@ -738,7 +732,7 @@ def plot_coverage_time_with_band(
 
 
 def _estimate_recovery_time(
-    metrics: Dict[str, np.ndarray], t_fail: float, threshold: float = 90.0
+    metrics: dict[str, np.ndarray], t_fail: float, threshold: float = 90.0
 ) -> float:
     """Return time-to-recover (seconds) when rolling avg ≥ threshold after failure.
     Returns NaN if not reached.
@@ -755,10 +749,10 @@ def _estimate_recovery_time(
 
 
 def plot_failure_recovery(
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     out_png: str,
     t_fail: float,
-    t_rec90: Optional[float] = None,
+    t_rec90: float | None = None,
     y_tick_step: int = 5,
 ) -> None:
     t = metrics.get("time")
@@ -784,7 +778,7 @@ def plot_failure_recovery(
     if t_rec is not None:
         plt.axvline(t_rec, color="#6a1b9a", ls="--", lw=1.2)
     # Annotate min coverage in the window
-    try:
+    with contextlib.suppress(Exception):
         j0 = int(np.searchsorted(t, t_fail))
         j1 = (
             int(np.searchsorted(t, t_rec))
@@ -804,8 +798,6 @@ def plot_failure_recovery(
                 fontsize=8,
                 color="#c62828",
             )
-    except Exception:
-        pass
     plt.ylim(0, 100)
     if y_tick_step > 0:
         plt.yticks(np.arange(0, 101, y_tick_step))
@@ -821,10 +813,10 @@ def plot_failure_recovery(
 
 
 def plot_failure_zoom(
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     out_png: str,
     t_fail: float,
-    t_rec90: Optional[float] = None,
+    t_rec90: float | None = None,
     left_pad: float = 300.0,
     right_pad: float = 300.0,
     y_margin: float = 5.0,
@@ -869,11 +861,11 @@ def plot_failure_zoom(
 
 
 def _detect_reentry_post_fail(
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     t_fail: float,
     window_s: float = 600.0,
     range_pct: float = 3.0,
-) -> Optional[float]:
+) -> float | None:
     """Earliest time ≥ t_fail where rolling-average range over next window ≤ range_pct."""
     t = metrics.get("time")
     roll = metrics.get("rolling_avg_%")
@@ -883,7 +875,7 @@ def _detect_reentry_post_fail(
     if roll is None or np.all(np.isnan(roll)):
         roll = _rolling_mean(cov, t, 240.0)
     dt = np.nanmedian(np.diff(t)) if len(t) > 1 else 1.0
-    win = max(1, int(round(window_s / max(dt, 1e-6))))
+    win = max(1, round(window_s / max(dt, 1e-6)))
     start_idx = int(np.searchsorted(t, t_fail))
     for i in range(start_idx, max(start_idx, len(t) - win)):
         seg = roll[i : i + win]
@@ -896,7 +888,7 @@ def _detect_reentry_post_fail(
 
 
 def plot_failure_tripanel(
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     out_png: str,
     t_fail: float,
     theta: float = 180.0,
@@ -941,7 +933,7 @@ def plot_failure_tripanel(
     if t_rec is not None:
         axs[0].axvline(t_rec, color="#6a1b9a", ls="--", lw=1.2)
     # Min coverage annotation in [t_fail, t_rec or t_fail+900]
-    try:
+    with contextlib.suppress(Exception):
         j0 = int(np.searchsorted(t, t_fail))
         j1 = (
             int(np.searchsorted(t, t_rec))
@@ -961,8 +953,6 @@ def plot_failure_tripanel(
                 fontsize=8,
                 color="#c62828",
             )
-    except Exception:
-        pass
     axs[0].set_ylabel("Coverage (%)")
     axs[0].legend(loc="lower right", fontsize=9)
     axs[0].grid(True, alpha=0.3)
@@ -975,7 +965,7 @@ def plot_failure_tripanel(
     if t_rec is not None:
         axs[1].axvline(t_rec, color="#6a1b9a", ls="--", lw=1.2)
     # Peak annotation
-    try:
+    with contextlib.suppress(Exception):
         k = int(np.nanargmax(overdue))
         axs[1].scatter([t[k]], [overdue[k]], color="#b71c1c", zorder=5)
         axs[1].text(
@@ -987,8 +977,6 @@ def plot_failure_tripanel(
             fontsize=8,
             color="#b71c1c",
         )
-    except Exception:
-        pass
     axs[1].set_ylabel("# cells > Θ")
     axs[1].legend(loc="upper right", fontsize=9)
     axs[1].grid(True, alpha=0.3)
@@ -1021,7 +1009,7 @@ def plot_failure_tripanel(
 
 
 def plot_cost_index(
-    metrics: Dict[str, np.ndarray], out_png: str, rate_per_hour: float = 1.0
+    metrics: dict[str, np.ndarray], out_png: str, rate_per_hour: float = 1.0
 ) -> None:
     """Plot a simple operating cost index: cumulative UAV-hours × rate.
 
@@ -1052,10 +1040,10 @@ def plot_cost_index(
 
 def plot_soc_series(
     times: np.ndarray,
-    series: Dict[str, np.ndarray],
+    series: dict[str, np.ndarray],
     out_png: str,
-    highlight: Optional[Sequence[str]] = None,
-    soc_floor: Optional[float] = None,
+    highlight: Sequence[str] | None = None,
+    soc_floor: float | None = None,
 ) -> None:
     plt.figure(figsize=(9, 3.5))
     # Choose a small subset if many columns
@@ -1085,7 +1073,7 @@ def plot_revisit_hist(
     snapshot_path: str,
     out_png: str,
     theta: float = 180.0,
-    snapshot_time: Optional[float] = None,
+    snapshot_time: float | None = None,
 ) -> None:
     data = read_coverage_snapshot(snapshot_path)
     ages = data["age"]
@@ -1122,11 +1110,11 @@ def plot_revisit_percentiles(
 ) -> None:
     if not snapshot_paths:
         return
-    times: List[float] = []
-    p50: List[float] = []
-    p90: List[float] = []
-    p99: List[float] = []
-    p100: List[float] = []
+    times: list[float] = []
+    p50: list[float] = []
+    p90: list[float] = []
+    p99: list[float] = []
+    p100: list[float] = []
     for i, p in enumerate(snapshot_paths):
         data = read_coverage_snapshot(p)
         ages = data["age"]
@@ -1168,13 +1156,13 @@ def plot_revisit_percentiles(
 class RunArtifacts:
     base: str  # e.g. results/sim_020_roundrobin_...
     metrics: str
-    soc_series: Optional[str]
-    recovery_metrics: Optional[str]
-    coverage_snaps: List[str]
-    final_coverage: Optional[str]
+    soc_series: str | None
+    recovery_metrics: str | None
+    coverage_snaps: list[str]
+    final_coverage: str | None
 
 
-def find_run_artifacts(tag: str) -> Optional[RunArtifacts]:
+def find_run_artifacts(tag: str) -> RunArtifacts | None:
     """Find artifacts for a run by partial tag, e.g., 'sim_020_roundrobin_2025'."""
     # Metrics
     m = sorted(glob.glob(f"results/{tag}*_metrics.csv"))
@@ -1204,42 +1192,40 @@ def find_run_artifacts(tag: str) -> Optional[RunArtifacts]:
     )
 
 
-def _parse_failure_time_from_tag(base_tag: str) -> Optional[float]:
+def _parse_failure_time_from_tag(base_tag: str) -> float | None:
     """Extract t_fail from base tag like '...FAIL-time-u03-t1800_...'."""
-    try:
+    with contextlib.suppress(Exception):
         if "FAIL-time-" in base_tag and "-t" in base_tag:
             seg = base_tag.split("-t")[-1]
             num = "".join(ch for ch in seg if ch.isdigit())
             if num:
                 return float(num)
-    except Exception:
-        pass
     return None
 
 
-def _load_snapshot_ages(paths: Sequence[str]) -> Optional[np.ndarray]:
+def _load_snapshot_ages(paths: Sequence[str]) -> np.ndarray | None:
     if not paths:
         return None
-    ages_list: List[np.ndarray] = []
+    ages_list: list[np.ndarray] = []
     for p in paths:
         d = read_coverage_snapshot(p)
         ages_list.append(d["age"])
     try:
         return np.vstack(ages_list)  # shape: [S, C]
-    except Exception:
+    except ValueError:
         return None
 
 
-def _load_snapshot_overdue(paths: Sequence[str]) -> Optional[np.ndarray]:
+def _load_snapshot_overdue(paths: Sequence[str]) -> np.ndarray | None:
     if not paths:
         return None
-    o_list: List[np.ndarray] = []
+    o_list: list[np.ndarray] = []
     for p in paths:
         d = read_coverage_snapshot(p)
         o_list.append(d["overdue"])
     try:
         return np.vstack(o_list)  # shape: [S, C]
-    except Exception:
+    except ValueError:
         return None
 
 
@@ -1355,13 +1341,13 @@ def plot_orphan_coverage(
     plt.close()
 
 
-def load_recovery_annotations(rec_path: Optional[str]) -> Dict[str, float]:
-    ann: Dict[str, float] = {}
+def load_recovery_annotations(rec_path: str | None) -> dict[str, float]:
+    ann: dict[str, float] = {}
     if not rec_path:
         return ann
     # recovery_metrics.csv has header: t_fail, min_coverage_post_fail,
     # time_under_90_s, recovery_time_to_90_s
-    try:
+    with contextlib.suppress(Exception):
         with open(rec_path, newline="") as f:
             r = list(csv.DictReader(f))
         if not r:
@@ -1373,13 +1359,11 @@ def load_recovery_annotations(rec_path: Optional[str]) -> Dict[str, float]:
             ann["Failure"] = t_fail
         if not math.isnan(t_fail) and not math.isnan(rec_90):
             ann["Recovered≥90%"] = t_fail + rec_90
-    except Exception:
-        pass
     return ann
 
 
 def _detect_steady_start(
-    metrics: Dict[str, np.ndarray],
+    metrics: dict[str, np.ndarray],
     warmup_s: float = 600.0,
     window_s: float = 600.0,
     range_pct: float = 3.0,
@@ -1395,7 +1379,7 @@ def _detect_steady_start(
     if roll is None or np.all(np.isnan(roll)):
         roll = _rolling_mean(cov, t, 240.0)
     dt = np.nanmedian(np.diff(t)) if len(t) > 1 else 1.0
-    win = max(1, int(round(window_s / max(dt, 1e-6))))
+    win = max(1, round(window_s / max(dt, 1e-6)))
     start_idx = np.searchsorted(t, warmup_s)
     for i in range(start_idx, max(start_idx, len(t) - win)):
         seg = roll[i : i + win]
@@ -1414,15 +1398,15 @@ def generate_figures_for_run(
     cost_rate_per_hour: float = 1.0,
     snapshot_period_s: float = 600.0,
     suffix: str = "",
-    band_start: Optional[str] = None,
+    band_start: str | None = None,
     band_window_s: float = 600.0,
     band_range_pct: float = 3.0,
-) -> List[str]:
+) -> list[str]:
     """Generate all Stage-6 figures for the given run.
 
     Returns list of saved PNG paths.
     """
-    out_paths: List[str] = []
+    out_paths: list[str] = []
     figs_dir = "figures"
     base_tag = os.path.basename(art.base)
 
@@ -1447,7 +1431,7 @@ def generate_figures_for_run(
         else:
             try:
                 steady_start = float(band_start)
-            except Exception:
+            except (ValueError, TypeError):
                 steady_start = 600.0
     p_band = os.path.join(figs_dir, f"{tag}_coverage_time_band.png")
     plot_coverage_time_with_band(metrics, p_band, steady_start_s=steady_start)
@@ -1470,7 +1454,7 @@ def generate_figures_for_run(
         times, series = read_soc_timeseries(art.soc_series)
         p = os.path.join(figs_dir, f"{tag}_soc_traces.png")
         # Try to highlight contingency '21' and/or bridging neighbors if present
-        highlights = [k for k in series.keys() if k in {"21", "20", "22"}]
+        highlights = [k for k in series if k in {"21", "20", "22"}]
         plot_soc_series(times, series, p, highlight=highlights, soc_floor=soc_floor)
         out_paths.append(p)
 
@@ -1482,7 +1466,7 @@ def generate_figures_for_run(
         for snap_idx, lbl in zip(idxs, labels):
             snap = art.coverage_snaps[snap_idx]
             # Infer snapshot time ≈ (snap_idx+1) * snapshot_period_s, rough but useful
-            t_guess: Optional[float] = (snap_idx + 1) * snapshot_period_s
+            t_guess: float | None = (snap_idx + 1) * snapshot_period_s
             p = os.path.join(figs_dir, f"{tag}_revisit_hist_{lbl}.png")
             plot_revisit_hist(snap, p, theta=theta, snapshot_time=t_guess)
             out_paths.append(p)
@@ -1586,7 +1570,7 @@ def main():
         return
 
     _ensure_dir("figures")
-    index: Dict[str, List[str]] = {}
+    index: dict[str, list[str]] = {}
 
     if steady:
         print(f"Generating figures for steady-state: {steady.base}")
@@ -1717,10 +1701,7 @@ def main():
                 lab: summarize_metrics(m) for lab, m in zip(labels, metrics_list)
             }
             with open(os.path.join(comp_dir, "compare_summary.txt"), "w") as f:
-                for lab, s in summary.items():
-                    f.write(
-                        f"{lab}: avg={s['avg']:.1f}%, peak={s['peak']:.1f}%, time>=90%={s['time_ge_90']:.0f}s\n"
-                    )
+                f.writelines(f"{lab}: avg={s['avg']:.1f}%, peak={s['peak']:.1f}%, time>=90%={s['time_ge_90']:.0f}s\n" for lab, s in summary.items())
 
             if args.make_table:
                 plot_comparison_table(arts, os.path.join(comp_dir, "compare_table.png"))

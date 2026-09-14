@@ -11,9 +11,10 @@ Key advantages over KMNN:
 - Better coverage consistency across multiple laps
 """
 
-from typing import Dict, List, Optional, Sequence, Tuple
-import numpy as np
+from collections.abc import Sequence
 from math import hypot
+
+import numpy as np
 
 from .core.cell import Cell
 from .core.route import Route
@@ -25,10 +26,10 @@ def generate_routes_roundrobin(
     cells: Sequence[Cell],
     n_launch: int,
     cruise_speed: float,
-    depot: Tuple[float, float] = (0.0, 0.0),
+    depot: tuple[float, float] = (0.0, 0.0),
     furthest_first: bool = False,
-    buse_s: Optional[float] = None,
-) -> Tuple[List[Route], object]:
+    buse_s: float | None = None,
+) -> tuple[list[Route], object]:
     """Generate routes via a serpentine sweep + seeded round-robin + smoothing.
 
     1. Sweep the grid in a boustrophedon order, starting from the row
@@ -70,7 +71,7 @@ def generate_routes_roundrobin(
     sweep = _serpentine_order(cells, depot)
     seed_offset = _pick_seeds(sweep, n_launch, depot, furthest_first)
 
-    routes: List[List[Cell]] = [[] for _ in range(n_launch)]
+    routes: list[list[Cell]] = [[] for _ in range(n_launch)]
     for i, cell in enumerate(sweep):
         routes[(i + seed_offset) % n_launch].append(cell)
 
@@ -121,17 +122,17 @@ def generate_routes_roundrobin(
     return route_objects, summary
 
 
-def _serpentine_order(cells: Sequence[Cell], depot: Tuple[float, float]) -> List[Cell]:
+def _serpentine_order(cells: Sequence[Cell], depot: tuple[float, float]) -> list[Cell]:
     """Boustrophedon sweep: group cells by row (y), alternate column
     traversal direction per row, starting from the row nearest the depot."""
-    rows: Dict[float, List[Cell]] = {}
+    rows: dict[float, list[Cell]] = {}
     for cell in cells:
         key = round(cell.y, 6)
         rows.setdefault(key, []).append(cell)
 
     row_keys = sorted(rows.keys(), key=lambda y: abs(y - depot[1]))
 
-    ordered: List[Cell] = []
+    ordered: list[Cell] = []
     for i, y in enumerate(row_keys):
         row_cells = sorted(rows[y], key=lambda c: c.x)
         if i % 2 == 1:
@@ -141,7 +142,7 @@ def _serpentine_order(cells: Sequence[Cell], depot: Tuple[float, float]) -> List
 
 
 def _pick_seeds(
-    sweep: List[Cell], n: int, depot: Tuple[float, float], furthest_first: bool
+    sweep: list[Cell], n: int, depot: tuple[float, float], furthest_first: bool
 ) -> int:
     """Resolve n evenly spaced seed positions along the sweep to a single
     round-robin phase offset. With furthest_first, the offset is chosen so
@@ -156,12 +157,12 @@ def _pick_seeds(
 
 
 def _smooth_routes(
-    routes: List[List[Cell]],
-    depot: Tuple[float, float],
+    routes: list[list[Cell]],
+    depot: tuple[float, float],
     cruise_speed: float,
-    buse_s: Optional[float] = None,
+    buse_s: float | None = None,
     max_passes: int = 3,
-) -> Tuple[List[List[Cell]], int]:
+) -> tuple[list[list[Cell]], int]:
     """Local boundary smoothing between adjacent routes: move or swap 1-2
     boundary cells if it reduces loop-time variance and keeps both routes
     within buse_s."""
@@ -169,13 +170,13 @@ def _smooth_routes(
     if n < 2:
         return routes, 0
 
-    def loop_time(cell_list: List[Cell]) -> float:
+    def loop_time(cell_list: list[Cell]) -> float:
         # Use the same best-of-(sweep, nearest-neighbour) time that the
         # final route will report, so the smoothing objective matches
         # loop_time_std exactly instead of a pre-reorder proxy for it.
         return _route_time(cell_list, depot, cruise_speed)
 
-    def total_deviation(times: List[float]) -> float:
+    def total_deviation(times: list[float]) -> float:
         # Sum of squared deviations from the mean: strictly decreasing this
         # is equivalent to strictly decreasing the population variance (and
         # thus loop_time_std), unlike a sum-of-absolute-deviations proxy
@@ -214,11 +215,11 @@ def _smooth_routes(
 
 
 def _boundary_candidates(
-    route_u: List[Cell], route_v: List[Cell]
-) -> List[Tuple[List[Cell], List[Cell]]]:
+    route_u: list[Cell], route_v: list[Cell]
+) -> list[tuple[list[Cell], list[Cell]]]:
     """Candidate (new_u, new_v) pairs from moving/swapping 1-2 boundary
     cells between two adjacent routes."""
-    candidates: List[Tuple[List[Cell], List[Cell]]] = []
+    candidates: list[tuple[list[Cell], list[Cell]]] = []
     for k in (1, 2):
         if len(route_u) > k:
             candidates.append((route_u[:-k], route_u[-k:] + route_v))
@@ -230,8 +231,8 @@ def _boundary_candidates(
 
 
 def _best_order(
-    cells: List[Cell], depot: Tuple[float, float], cruise_speed: float
-) -> List[Cell]:
+    cells: list[Cell], depot: tuple[float, float], cruise_speed: float
+) -> list[Cell]:
     """Nearest-neighbour tie-break: only replace sweep order if it is
     strictly shorter (the serpentine sweep already yields short hops)."""
     if not cells:
@@ -245,7 +246,7 @@ def _best_order(
 
 
 def _route_time(
-    cells: List[Cell], depot: Tuple[float, float], cruise_speed: float
+    cells: list[Cell], depot: tuple[float, float], cruise_speed: float
 ) -> float:
     """Best achievable loop time for a cell set: whichever of the sweep
     order or its nearest-neighbour tie-break is shorter."""
@@ -255,7 +256,7 @@ def _route_time(
 
 
 def _calculate_route_time(
-    cells: List[Cell], cruise_speed: float, depot: Tuple[float, float]
+    cells: list[Cell], cruise_speed: float, depot: tuple[float, float]
 ) -> float:
     """Calculate time to complete the route loop."""
     if not cells:
@@ -282,8 +283,8 @@ def _calculate_route_time(
 
 
 def _order_nearest_neighbour(
-    cells: List[Cell], depot: Tuple[float, float]
-) -> List[Cell]:
+    cells: list[Cell], depot: tuple[float, float]
+) -> list[Cell]:
     """Order cells within a route for efficient traversal using nearest neighbor heuristic."""
     if len(cells) <= 2:
         return cells

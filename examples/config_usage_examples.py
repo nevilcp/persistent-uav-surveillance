@@ -12,17 +12,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from uav_surveil.config import (
-    SystemParameters,
-    load_scenario,
-    list_available_scenarios,
-    create_parameter_sweep,
     compare_scenarios,
+    create_parameter_sweep,
+    list_available_scenarios,
+    load_scenario,
 )
-from uav_surveil.config.config_manager import ConfigManager, load_global_config
+from uav_surveil.config.config_manager import ConfigManager
 from uav_surveil.stage0_battery import (
+    get_max_grid_from_config,
     optimize_battery_from_config,
     validate_mission_feasibility,
-    get_max_grid_from_config,
 )
 
 
@@ -83,7 +82,7 @@ def example_3_stage0_integration():
     # Run battery optimization using config
     result = optimize_battery_from_config(config, l_grid)
 
-    print(f"Battery optimization results:")
+    print("Battery optimization results:")
     print(f"  Required reserve (ξ): {result.xi_optimal:.3f} ({result.xi_optimal:.1%})")
     print(f"  Mission feasible: {result.is_feasible}")
     print(f"  Battery utilization: {result.utilization:.1%}")
@@ -212,8 +211,8 @@ def example_7_batch_analysis():
                 f"{scenario_name:<12} {result.xi_optimal:<10.3f} {feasible_str:<10} "
                 f"{result.margin_seconds:<12.1f} {max_grid:<12.1f}"
             )
-        except Exception as e:
-            print(f"{scenario_name:<12} ERROR: {str(e)}")
+        except Exception as e:  # noqa: BLE001 - per-scenario error report, must not abort the loop
+            print(f"{scenario_name:<12} ERROR: {e!s}")
 
 
 if __name__ == "__main__":
@@ -234,7 +233,7 @@ if __name__ == "__main__":
         print("✅ All examples completed successfully!")
         print("=" * 60)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - top-level script guard, reports full traceback
         print(f"\n❌ Error running examples: {e}")
         import traceback
 

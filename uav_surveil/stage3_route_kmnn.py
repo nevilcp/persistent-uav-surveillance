@@ -11,9 +11,11 @@ into *stage3_route_factory*.
 
 from __future__ import annotations
 
-from typing import Sequence, List, Tuple
-import numpy as np
+from collections.abc import Sequence
+from itertools import pairwise
 from math import hypot
+
+import numpy as np
 
 from .core.cell import Cell
 from .core.route import Route
@@ -70,8 +72,8 @@ def _kmeans(
 
 
 def _order_nearest_neighbour(
-    cells: List[Cell], depot: Tuple[float, float]
-) -> List[Cell]:
+    cells: list[Cell], depot: tuple[float, float]
+) -> list[Cell]:
     if len(cells) <= 2:
         return cells
     # Start from cell with smallest (x+y) to get deterministic order
@@ -96,8 +98,8 @@ def _order_nearest_neighbour(
 
 
 def _rotate_to_nearest_depot(
-    cells: List[Cell], depot: Tuple[float, float]
-) -> List[Cell]:
+    cells: list[Cell], depot: tuple[float, float]
+) -> list[Cell]:
     if not cells:
         return cells
     nearest_idx = min(
@@ -117,8 +119,8 @@ def generate_routes_kmnn(
     cells: Sequence[Cell],
     n_launch: int,
     cruise_speed: float,
-    depot: Tuple[float, float] = (0.0, 0.0),
-) -> Tuple[List[Route], object]:
+    depot: tuple[float, float] = (0.0, 0.0),
+) -> tuple[list[Route], object]:
     """Generate *n_launch* routes using K-means clustering + NN pathing.
 
     Returns:
@@ -134,11 +136,11 @@ def generate_routes_kmnn(
     assignments = _kmeans(pts, n_launch)
 
     # Build routes per cluster
-    clusters: List[List[Cell]] = [[] for _ in range(n_launch)]
+    clusters: list[list[Cell]] = [[] for _ in range(n_launch)]
     for cell, idx in zip(cells, assignments):
         clusters[idx].append(cell)
 
-    routes: List[Route] = []
+    routes: list[Route] = []
     longest_loop = 0.0
     for idx, cluster in enumerate(clusters):
         if not cluster:
@@ -149,7 +151,7 @@ def generate_routes_kmnn(
 
         # Compute path distance
         dist = 0.0
-        for a, b in zip(ordered[:-1], ordered[1:]):
+        for a, b in pairwise(ordered):
             dist += hypot(a.x - b.x, a.y - b.y)
         # Ferry legs
         dist += 2 * hypot(ordered[0].x - depot[0], ordered[0].y - depot[1])

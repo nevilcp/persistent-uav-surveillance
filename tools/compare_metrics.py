@@ -1,4 +1,8 @@
-import csv, json, math, os, statistics as st
+import csv
+import json
+import math
+import os
+import statistics as st
 
 
 def read_metrics(path: str):
@@ -11,7 +15,7 @@ def read_metrics(path: str):
                 data.setdefault(k, [])
                 try:
                     data[k].append(float(v))
-                except Exception:
+                except (ValueError, TypeError):
                     data[k].append(float("nan"))
     return data
 
@@ -94,7 +98,7 @@ if os.path.exists(rec23):
             def f2(x):
                 try:
                     return float(x)
-                except Exception:
+                except (ValueError, TypeError):
                     return float("nan")
 
             rec_extra = {

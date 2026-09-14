@@ -1,8 +1,8 @@
 """Unit tests for Stage 4 baseline policy (apply_policy)."""
 
-from uav_surveil.stage4_policy import apply_policy
-from uav_surveil.core.uav import UAV, UAVState
 from uav_surveil.config.parameters import SystemParameters
+from uav_surveil.core.uav import UAV, UAVState
+from uav_surveil.stage4_policy import apply_policy
 
 
 def test_low_soc_triggers_return():

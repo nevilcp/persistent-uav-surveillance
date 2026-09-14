@@ -1,10 +1,11 @@
 """Tests for GSS State model."""
 
 import pytest
-from ..gss.state import State
-from ..core.uav import UAV
+
 from ..core.cell import Cell
 from ..core.route import Route
+from ..core.uav import UAV
+from ..gss.state import State
 
 
 class TestState:

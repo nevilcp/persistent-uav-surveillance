@@ -4,10 +4,10 @@ This module defines the fundamental UAV data structure used throughout
 the surveillance system.
 """
 
-from typing import List, Optional, Dict
 from dataclasses import dataclass, field
-from .route import Route
 from enum import Enum
+
+from .route import Route
 
 # ---------------------------------------------------------------------------
 # UAV operational state used by scheduler and metrics
@@ -55,24 +55,24 @@ class UAV:
     x: float
     y: float
     soc: float  # State of Charge (0.0 to 1.0)
-    route_list: List[Route]
+    route_list: list[Route]
     launch_time: float = 0.0  # Planned start time (s) assigned by scheduler
     is_active: bool = False
     # Extended attributes ---------------------------------------------------
     state: UAVState = UAVState.SPARE  # Initial state; updated by scheduler
-    phase_offset: Optional[float] = (
+    phase_offset: float | None = (
         None  # Route's initial departure phase; kept across swaps
     )
     swap_timer: float = 0.0  # Remaining hot-swap time (s)
-    last_update: Optional[float] = None
+    last_update: float | None = None
     is_contingency: bool = False  # True if this UAV is reserved for failure scenarios
     # Stage-5 failure handling ----------------------------------------------
     is_failed: bool = False  # Hard failure flag (removed from active control)
-    tail_index_at_failure: Optional[int] = (
+    tail_index_at_failure: int | None = (
         None  # Waypoint index at failure for tail takeover
     )
     last_insert_time: float = 0.0  # Timestamp of last temporary insert (bridge mode)
-    temp_assignments: Dict[str, int] = field(
+    temp_assignments: dict[str, int] = field(
         default_factory=dict
     )  # failed_id -> count of temporary inserts
 

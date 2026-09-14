@@ -4,11 +4,12 @@ This module defines all tunable parameters for the surveillance system,
 enabling easy experimentation and scenario management.
 """
 
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, field_validator
-from pathlib import Path
 import json
 from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class MissionParameters(BaseModel):
@@ -113,11 +114,11 @@ class GridParameters(BaseModel):
     cell_size: float = Field(
         default=40.0, ge=10.0, le=200.0, description="Grid cell side length (m)"
     )
-    priority_zones: Dict[str, float] = Field(
+    priority_zones: dict[str, float] = Field(
         default_factory=dict,
         description="Special priority zones {zone_id: priority_weight}",
     )
-    exclusion_zones: List[Dict[str, Any]] = Field(
+    exclusion_zones: list[dict[str, Any]] = Field(
         default_factory=list, description="No-fly zones as list of polygon definitions"
     )
     origin: tuple[float, float] = Field(
@@ -211,17 +212,17 @@ class FailureTriggerConfig(BaseModel):
     """Configurable failure trigger (time|position|soc)."""
 
     kind: str = Field(default="off", description="Trigger type: off|time|position|soc")
-    uav_id: Optional[str] = Field(default=None, description="Target UAV id for failure")
-    t_s: Optional[float] = Field(
+    uav_id: str | None = Field(default=None, description="Target UAV id for failure")
+    t_s: float | None = Field(
         default=None, description="Failure time (s) for kind=time"
     )
-    x: Optional[float] = Field(
+    x: float | None = Field(
         default=None, description="X coordinate for kind=position"
     )
-    y: Optional[float] = Field(
+    y: float | None = Field(
         default=None, description="Y coordinate for kind=position"
     )
-    soc_threshold: Optional[float] = Field(
+    soc_threshold: float | None = Field(
         default=None, description="SoC threshold for kind=soc"
     )
 
@@ -333,7 +334,7 @@ class SimulationParameters(BaseModel):
         le=10000,
         description="Monte Carlo simulation runs for V&V",
     )
-    random_seed: Optional[int] = Field(
+    random_seed: int | None = Field(
         default=42, description="Random seed for reproducibility"
     )
     failure_rate: float = Field(
@@ -419,7 +420,7 @@ class SystemParameters(BaseModel):
             "total_inventory": self.optimization.total_inventory,
         }
 
-    def validate_consistency(self) -> List[str]:
+    def validate_consistency(self) -> list[str]:
         """Validate parameter consistency across modules."""
         warnings = []
 

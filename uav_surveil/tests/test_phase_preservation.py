@@ -2,8 +2,8 @@
 (architecture.md §4.2 / §2.1; thesis Alg. 6)."""
 
 from uav_surveil.config import load_scenario
-from uav_surveil.gss.simulation import GSSSimulation
 from uav_surveil.core.uav import UAVState
+from uav_surveil.gss.simulation import GSSSimulation
 
 
 def _initialized_sim():

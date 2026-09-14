@@ -5,17 +5,19 @@ balance and shorter loop times compared to KMNN.
 """
 
 from __future__ import annotations
-from typing import List, Sequence, Tuple
-import numpy as np
-from math import hypot
+
 import time
+from collections.abc import Sequence
+from math import hypot
+
+import numpy as np
 
 from .core.cell import Cell
 from .core.route import Route
 
 try:
     from alns import ALNS
-    from alns.accept import HillClimbing, SimulatedAnnealing
+    from alns.accept import SimulatedAnnealing
     from alns.select import RouletteWheel
     from alns.stop import MaxIterations
 
@@ -30,7 +32,7 @@ __all__ = ["generate_routes_alns"]
 MIN_CELLS_PER_ROUTE = 7
 
 
-def _merge_small_routes(route_list: List[Route], n_launch: int) -> List[Route]:
+def _merge_small_routes(route_list: list[Route], n_launch: int) -> list[Route]:
     """Ensure each route has at least MIN_CELLS_PER_ROUTE cells by redistributing."""
     routes = route_list.copy()
     orphan_cells = []
@@ -40,10 +42,8 @@ def _merge_small_routes(route_list: List[Route], n_launch: int) -> List[Route]:
             routes.remove(r)
     # attach orphans round-robin to shortest routes
     routes.sort(key=lambda rt: len(rt.cell_sequence))
-    idx = 0
-    for cid in orphan_cells:
+    for idx, cid in enumerate(orphan_cells):
         routes[idx % len(routes)].cell_sequence.append(cid)
-        idx += 1
     # if still fewer than n_launch, create empty placeholders
     while len(routes) < n_launch:
         routes.append(
@@ -56,9 +56,9 @@ def generate_routes_alns(
     cells: Sequence[Cell],
     n_launch: int,
     cruise_speed: float,
-    depot: Tuple[float, float] = (0.0, 0.0),
+    depot: tuple[float, float] = (0.0, 0.0),
     max_iterations: int = 2000,
-) -> Tuple[List[Route], object]:
+) -> tuple[list[Route], object]:
     """Generate routes using Adaptive Large Neighbourhood Search (ALNS)."""
 
     if not ALNS_AVAILABLE:
@@ -162,7 +162,7 @@ def generate_routes_alns(
             "improvement": improvement,
         }
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - ALNS library errors vary, fall back to KMNN
         print(f"⚠️ ALNS failed ({e}), using KMNN fallback")
         from .stage3_route_kmnn import generate_routes_kmnn
 
@@ -214,10 +214,10 @@ def _simple_insertion(destroyed, rng):
 
 
 def _calculate_objective(
-    solution: List[List[int]],
+    solution: list[list[int]],
     cells: Sequence[Cell],
     cruise_speed: float,
-    depot: Tuple[float, float] = (-500.0, 0.0),
+    depot: tuple[float, float] = (-500.0, 0.0),
 ) -> float:
     """Calculate the objective function (total route time)."""
     total_time = 0.0
@@ -249,11 +249,11 @@ def _calculate_objective(
 
 
 def _solution_to_routes(
-    solution: List[List[int]],
+    solution: list[list[int]],
     cells: Sequence[Cell],
-    depot: Tuple[float, float],
+    depot: tuple[float, float],
     cruise_speed: float,
-) -> List[Route]:
+) -> list[Route]:
     """Convert ALNS solution back to Route objects."""
     routes = []
 

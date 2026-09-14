@@ -4,7 +4,6 @@ This module defines the route structure used for UAV navigation
 and surveillance path optimization.
 """
 
-from typing import List, Optional
 from dataclasses import dataclass
 
 
@@ -24,10 +23,10 @@ class Route:
     """
 
     id: str
-    cell_sequence: List[str]
-    estimated_duration: Optional[float] = None
-    departure_time: Optional[float] = None
-    loop_time: Optional[float] = None
+    cell_sequence: list[str]
+    estimated_duration: float | None = None
+    departure_time: float | None = None
+    loop_time: float | None = None
 
     def __post_init__(self):
         """Validate route parameters after initialization."""

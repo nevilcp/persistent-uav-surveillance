@@ -5,7 +5,8 @@ This script demonstrates how to initialize and run the complete UAV surveillance
 simulation using the baseline configuration.
 """
 
-import os, sys
+import os
+import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 
@@ -34,7 +35,7 @@ def main():
     success = simulation.run(duration=300.0)
 
     if success:
-        print(f"\n📊 Final Results:")
+        print("\n📊 Final Results:")
         print(f"   • Total runtime: {simulation.metrics.total_runtime:.1f}s")
         print(f"   • Simulation time: {simulation.metrics.current_time:.0f}s")
         print(f"   • Coverage: {simulation.metrics.coverage_percentage:.1f}%")
@@ -47,7 +48,7 @@ def main():
         )
         print("\n🎉 Simulation completed successfully!")
     else:
-        print(f"\n❌ Simulation failed or encountered errors.")
+        print("\n❌ Simulation failed or encountered errors.")
         print(f"   Final state: {simulation.state}")
 
     print("=" * 60)

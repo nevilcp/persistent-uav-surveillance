@@ -5,9 +5,8 @@ It ensures that the furthest ferry distance plus grid patrol plus return
 is within the single battery endurance limit.
 """
 
-import math
-from typing import Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import SystemParameters

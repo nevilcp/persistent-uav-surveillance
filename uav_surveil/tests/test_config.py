@@ -1,26 +1,23 @@
 """Tests for the configuration system."""
 
-import pytest
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from datetime import datetime
+
+import pytest
+from pydantic import ValidationError
 
 from uav_surveil.config import (
-    SystemParameters,
-    MissionParameters,
-    UAVParameters,
     BatteryParameters,
     GridParameters,
-    OptimizationParameters,
+    MissionParameters,
     STLParameters,
-    SimulationParameters,
-    load_scenario,
-    list_available_scenarios,
-    create_parameter_sweep,
+    SystemParameters,
+    UAVParameters,
     compare_scenarios,
+    create_parameter_sweep,
+    list_available_scenarios,
+    load_scenario,
 )
-from pydantic import ValidationError
 from uav_surveil.config.config_manager import ConfigManager
 
 
@@ -224,7 +221,7 @@ class TestScenarios:
         assert "battery.soc_floor" in differences
 
         # Check structure of differences
-        for param, values in differences.items():
+        for values in differences.values():
             assert "baseline" in values
             assert "urban" in values
 
@@ -290,7 +287,7 @@ class TestConfigManager:
             manager = ConfigManager(temp_path)
 
             # Load and save configuration
-            config = manager.load_config("baseline")
+            manager.load_config("baseline")
             saved_path = manager.save_config()
 
             assert saved_path.exists()

@@ -5,7 +5,6 @@ discretized grid representation.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -24,7 +23,7 @@ class Cell:
     id: str
     x: float
     y: float
-    last_seen_ts: Optional[float] = None
+    last_seen_ts: float | None = None
     priority: float = 1.0
     is_covered: bool = False
 

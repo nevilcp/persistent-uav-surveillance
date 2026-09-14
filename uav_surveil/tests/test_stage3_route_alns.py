@@ -1,8 +1,7 @@
 """Unit tests for Stage 3A ALNS route generator."""
 
-import pytest
-from uav_surveil.stage3_route_alns import generate_routes_alns
 from uav_surveil.core.cell import Cell
+from uav_surveil.stage3_route_alns import generate_routes_alns
 
 
 def test_alns_loop_time_under_threshold():
@@ -27,7 +26,7 @@ def test_alns_loop_time_under_threshold():
     depot = (-500.0, 0.0)  # Baseline depot position
 
     # Generate routes
-    routes, metadata = generate_routes_alns(cells, n_launch, cruise_speed, depot)
+    routes, _metadata = generate_routes_alns(cells, n_launch, cruise_speed, depot)
 
     # Verify we have routes
     assert len(routes) > 0
@@ -74,7 +73,7 @@ def test_alns_route_balance():
     cruise_speed = 8.0
     depot = (-500.0, 0.0)
 
-    routes, metadata = generate_routes_alns(cells, n_launch, cruise_speed, depot)
+    routes, _metadata = generate_routes_alns(cells, n_launch, cruise_speed, depot)
 
     # Check route balance (should be roughly 36/4 = 9 cells per route)
     non_empty_routes = [r for r in routes if len(r.cell_sequence) > 0]

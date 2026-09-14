@@ -1,13 +1,13 @@
 """Tests for Stage 0: Battery Feasibility Checker and Optimization."""
 
 import pytest
+
 from ..stage0_battery import (
+    analyze_battery_margin,
     battery_feasible,
     calculate_max_grid_distance,
     estimate_mission_time,
     optimize_battery_reserve,
-    analyze_battery_margin,
-    BatteryOptimizationResult,
 )
 
 
@@ -29,28 +29,6 @@ class TestBatteryOptimization:
         # Max distance: 4 * 2100 = 8400m
         # Utilization needed: 2000/8400 = 0.238 (23.8%)
         # Minimum reserve xi: 1 - 0.238 = 0.762 (76.2% can be kept as reserve)
-        # But for optimization, we want MINIMUM xi, which would be much smaller
-        # Actually, let me recalculate: we need (1-xi)*8400 >= 2000
-        # So: xi <= 1 - 2000/8400 = 0.762
-        # The MINIMUM xi for feasibility is actually much smaller
-        # Let's use a more realistic case - if we want minimum reserve:
-        expected_xi = 1.0 - (
-            2000.0 / 8400.0
-        )  # This gives 0.762, which is MAX allowable
-        # For minimum, we want the smallest xi that still satisfies constraints
-        # Given no other constraints, minimum xi could be close to 0
-        # But let's test with 10% minimum safety reserve
-        expected_xi = 0.1  # Use 10% as baseline minimum
-
-        # For this specific mission, any xi >= 0.238 would work
-        # The optimization should find the minimum feasible xi
-        # which is close to the utilization needed
-        min_xi_needed = 1.0 - (2000.0 / 8400.0)  # 0.762
-        # But this doesn't make sense as minimum...
-        # Let me reconsider: if we need 2000m out of 8400m total
-        # Then we need 23.8% of battery, leaving 76.2% unused
-        # If xi is the unused fraction, then xi_optimal = 0.762
-        # If xi is the minimum required reserve, then we set it to something reasonable
         assert result.xi_optimal >= 0.0  # Should be non-negative
         assert result.is_feasible is True
 

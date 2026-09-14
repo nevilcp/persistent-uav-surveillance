@@ -4,18 +4,18 @@ Usage:
     routes, summary = create_route_generator(name)(cells, n_launch, speed)
 """
 
-from typing import Callable, Sequence, List
+from collections.abc import Callable, Sequence
+
 from .core.cell import Cell
 from .core.route import Route
-
 from .stage3_route import generate_routes_greedy
-from .stage3_route_kmnn import generate_routes_kmnn
 from .stage3_route_alns import generate_routes_alns
 from .stage3_route_balanced import generate_routes_balanced
+from .stage3_route_kmnn import generate_routes_kmnn
 from .stage3_route_roundrobin import generate_routes_roundrobin
 
 # Type definition for route generator functions
-Generator = Callable[[Sequence[Cell], int, float], tuple[List[Route], object]]
+Generator = Callable[[Sequence[Cell], int, float], tuple[list[Route], object]]
 
 # Map algorithm names to generator functions
 _MAP = {

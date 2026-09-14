@@ -8,9 +8,9 @@ pytest.skip(
 )
 
 
-from uav_surveil.stage3_route_kmnn import generate_routes_kmnn
-from uav_surveil.stage1_grid import build_surveillance_grid
 from uav_surveil.config.parameters import SystemParameters
+from uav_surveil.stage1_grid import build_surveillance_grid
+from uav_surveil.stage3_route_kmnn import generate_routes_kmnn
 
 
 def test_kmnn_longest_loop_under_threshold():

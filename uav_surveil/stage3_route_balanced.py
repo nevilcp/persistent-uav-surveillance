@@ -7,9 +7,11 @@ A simple improvement over KMNN that ensures:
 """
 
 from __future__ import annotations
-from typing import Sequence, List, Tuple
+
+from collections.abc import Sequence
+from math import hypot
+
 import numpy as np
-from math import hypot, ceil
 
 from .core.cell import Cell
 from .core.route import Route
@@ -21,8 +23,8 @@ def generate_routes_balanced(
     cells: Sequence[Cell],
     n_launch: int,
     cruise_speed: float,
-    depot: Tuple[float, float] = (0.0, 0.0),
-) -> Tuple[List[Route], dict]:
+    depot: tuple[float, float] = (0.0, 0.0),
+) -> tuple[list[Route], dict]:
     """
     Generate balanced routes using improved distribution.
 
@@ -37,8 +39,6 @@ def generate_routes_balanced(
     if not cells:
         return [], {"algorithm": "balanced", "longest_loop_time": 0.0}
 
-    # Convert to coordinates
-    coords = np.array([[cell.x, cell.y] for cell in cells])
     depot_coord = np.array([depot[0], depot[1]])
 
     # Strategy: Distribute cells evenly by distance from depot
@@ -97,10 +97,8 @@ def generate_routes_balanced(
             route_objects.remove(r)
         # Distribute orphans to existing routes (shortest first)
         route_objects.sort(key=lambda rt: len(rt.cell_sequence))
-        idx = 0
-        for cid in orphan_cells:
+        for idx, cid in enumerate(orphan_cells):
             route_objects[idx % len(route_objects)].cell_sequence.append(cid)
-            idx += 1
         # Re-add empty placeholders to keep count consistent
         while len(route_objects) < n_launch:
             route_objects.append(
@@ -129,7 +127,7 @@ def generate_routes_balanced(
     return route_objects, summary
 
 
-def _order_cells_efficiently(cells: List[Cell], depot: np.ndarray) -> List[Cell]:
+def _order_cells_efficiently(cells: list[Cell], depot: np.ndarray) -> list[Cell]:
     """Order cells within a route for efficient traversal (nearest neighbor)."""
     if len(cells) <= 1:
         return cells
@@ -156,7 +154,7 @@ def _order_cells_efficiently(cells: List[Cell], depot: np.ndarray) -> List[Cell]
 
 
 def _calculate_loop_time(
-    cells: List[Cell], cruise_speed: float, depot: np.ndarray
+    cells: list[Cell], cruise_speed: float, depot: np.ndarray
 ) -> float:
     """Calculate time to complete the route loop."""
     if not cells:
@@ -182,7 +180,7 @@ def _calculate_loop_time(
     return total_distance / cruise_speed if cruise_speed > 0 else 0.0
 
 
-def _calculate_balance_metric(routes: List[Route]) -> float:
+def _calculate_balance_metric(routes: list[Route]) -> float:
     """Calculate how balanced the routes are (lower = more balanced)."""
     lengths = [len(route.cell_sequence) for route in routes]
     if not lengths:

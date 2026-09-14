@@ -20,8 +20,8 @@ It does not infer from route snapshots and does not require rerunning the sim.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
-from typing import Dict
 
 import matplotlib
 
@@ -34,7 +34,7 @@ def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def _read_metrics_csv(path: str) -> Dict[str, np.ndarray]:
+def _read_metrics_csv(path: str) -> dict[str, np.ndarray]:
     import csv
 
     try:
@@ -43,8 +43,8 @@ def _read_metrics_csv(path: str) -> Dict[str, np.ndarray]:
         df = pd.read_csv(path)
         df.columns = [c.strip().lower() for c in df.columns]
         return {c: df[c].to_numpy(dtype=float) for c in df.columns}
-    except Exception:
-        cols: Dict[str, list[float]] = {}
+    except Exception:  # noqa: BLE001 - pandas missing or CSV unreadable, fall back to manual parsing
+        cols: dict[str, list[float]] = {}
         with open(path, newline="") as f:
             rdr = csv.DictReader(f)
             for row in rdr:
@@ -53,7 +53,7 @@ def _read_metrics_csv(path: str) -> Dict[str, np.ndarray]:
                     cols.setdefault(key, [])
                     try:
                         cols[key].append(float(v))
-                    except Exception:
+                    except (ValueError, TypeError):
                         cols[key].append(float("nan"))
         return {k: np.asarray(v, dtype=float) for k, v in cols.items()}
 
@@ -119,12 +119,10 @@ def plot_manual_contingency(base_tag: str, t_fail: float, out_png: str) -> None:
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("UAV count")
     ax.set_title("Fleet state over time")
-    try:
+    with contextlib.suppress(Exception):
         from matplotlib.ticker import MaxNLocator
 
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    except Exception:
-        pass
     ax.legend(loc="lower right", ncol=2)
     ax.grid(True, alpha=0.2)
     _ensure_dir(os.path.dirname(out_png))

@@ -4,10 +4,10 @@ This module defines the central state model for the surveillance system
 using Pydantic for validation and serialization.
 """
 
-from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
-from ..core.uav import UAV
+
 from ..core.cell import Cell
+from ..core.uav import UAV
 
 
 class State(BaseModel):
@@ -28,8 +28,8 @@ class State(BaseModel):
     """
 
     clock: int = Field(default=0, ge=0, description="Simulation time in seconds")
-    uavs: List[UAV] = Field(default_factory=list, description="Fleet of UAVs")
-    cells: List[Cell] = Field(
+    uavs: list[UAV] = Field(default_factory=list, description="Fleet of UAVs")
+    cells: list[Cell] = Field(
         default_factory=list, description="Surveillance grid cells"
     )
     spare_count: int = Field(default=0, ge=0, description="Available spare UAVs")
@@ -64,7 +64,7 @@ class State(BaseModel):
                 raise ValueError("Cell IDs must be unique")
         return v
 
-    def get_active_uavs(self) -> List[UAV]:
+    def get_active_uavs(self) -> list[UAV]:
         """Get list of currently active UAVs.
 
         Returns:

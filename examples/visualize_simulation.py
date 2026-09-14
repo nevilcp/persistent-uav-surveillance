@@ -1,26 +1,26 @@
-import os, sys
+import contextlib
+import os
+import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 import matplotlib
 
 matplotlib.use("Agg")  # Use non-GUI backend for headless environments
+
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from uav_surveil.config import load_scenario
-from uav_surveil.gss.simulation import GSSSimulation
-from uav_surveil.analysis_tools import (
-    compare_algorithm_performance,
-    log_cell_coverage_gaps,
-    make_simulation_info,
-)
 import numpy as np
-import time
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # Visual configuration
 # ---------------------------------------------------------------------------
-import matplotlib.cm as cm
+from matplotlib import animation, cm
+
+from uav_surveil.analysis_tools import (
+    log_cell_coverage_gaps,
+    make_simulation_info,
+)
+from uav_surveil.config import load_scenario
+from uav_surveil.gss.simulation import GSSSimulation
 
 # Colormap used for UAV SoC (red = empty, green = full)
 COLORMAP = cm.get_cmap("RdYlGn")
@@ -101,11 +101,9 @@ ax.set_title(title_str)
 
 # If events.csv exists for this run, we will show only compact markers in-plot
 _events_path = None
-try:
+with contextlib.suppress(Exception):
     if hasattr(sim, "_simulation_info") and sim._simulation_info:
         _events_path = f"results/{sim._simulation_info['base_name']}_events.csv"
-except Exception:
-    _events_path = None
 
 # Draw depot
 ax.plot([DEPOT_X], [DEPOT_Y], marker="*", color="red", markersize=15, label="Depot")
@@ -165,7 +163,7 @@ for i, uav in enumerate(uavs):
         va="top",
         fontweight="bold",
         color="black",
-        bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.8),
+        bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.8},
     )
     uav_id_labels.append(lbl)
 
@@ -178,7 +176,7 @@ hud_text = ax.text(
     va="top",
     ha="left",
     fontsize=9,
-    bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7),
+    bbox={"boxstyle": "round,pad=0.3", "fc": "white", "alpha": 0.7},
 )
 # Move failure banner outside the axes, bottom center of the figure
 fail_text = fig.text(
@@ -189,7 +187,7 @@ fail_text = fig.text(
     ha="center",
     fontsize=8,
     color="purple",
-    bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.7),
+    bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.7},
 )
 
 # Legend
@@ -217,11 +215,6 @@ def update(frame):
         # Handle empty UAV list
         uav_scatter.set_offsets(np.empty((0, 2)))
         uav_scatter.set_facecolors([])
-
-    # Update HUD metrics
-    total_time = sim.metrics.current_time if sim.metrics.current_time > 0 else 1
-    c2_pct = sim.metrics.stl_c2_violations / total_time * 100
-    c3_pct = sim.metrics.stl_c3_violations / total_time * 100
 
     hud_text.set_text(
         f"t = {current_time:4.0f}s\n"
@@ -281,7 +274,7 @@ fps = int(1000 / FRAME_INTERVAL)
 ani.save(mp4_path, writer="ffmpeg", fps=fps, bitrate=1800)
 
 # 🔍 FINAL ANALYSIS: Post-simulation summary
-print(f"\n📈 === Final Simulation Analysis ===")
+print("\n📈 === Final Simulation Analysis ===")
 
 # ✅ FLUSH CSV: Ensure all metrics are written to disk before reading
 if hasattr(sim, "_csv_writer") and sim._csv_writer:
@@ -308,7 +301,7 @@ if hasattr(sim, "_csv_file") and sim._csv_file:
 filename = None
 if hasattr(sim, "_simulation_info") and sim._simulation_info:
     info = sim._simulation_info
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
     filename = f"results/{info['base_name']}_final_coverage_gaps_{timestamp}.csv"
 
 final_coverage_gaps, overdue_cells = log_cell_coverage_gaps(
@@ -357,14 +350,14 @@ except ImportError:
             else:
                 peak_coverage = sim.metrics.coverage_percentage
                 global_avg = sim.metrics.coverage_percentage
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - diagnostic fallback, must not abort script
             print(f"⚠️  CSV parsing failed: {e}")
             peak_coverage = sim.metrics.coverage_percentage
             global_avg = sim.metrics.coverage_percentage
     else:
         peak_coverage = sim.metrics.coverage_percentage
         global_avg = sim.metrics.coverage_percentage
-except Exception as e:
+except Exception as e:  # noqa: BLE001 - diagnostic fallback, must not abort script
     print(f"⚠️  Error calculating metrics: {e}")
     peak_coverage = sim.metrics.coverage_percentage
     global_avg = sim.metrics.coverage_percentage
@@ -420,7 +413,7 @@ if getattr(config, "failure", None) and getattr(config.failure, "enabled", False
                         f"{rec_time_90:.0f}" if rec_time_90 is not None else "",
                     ]
                 )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - optional export, must not abort script
         print(f"⚠️  Recovery metrics export failed: {e}")
 
     # SoC time series dump
@@ -446,7 +439,7 @@ if getattr(config, "failure", None) and getattr(config.failure, "enabled", False
                             row.append("")
                     if t_val is not None:
                         w.writerow([f"{t_val:.0f}"] + row)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - optional export, must not abort script
         print(f"⚠️  SoC series export failed: {e}")
 
 rolling_avg = (
@@ -456,7 +449,7 @@ rolling_avg = (
 )
 overdue_count = len(overdue_cells)
 
-print(f"\n🏆 Performance Summary - {route_algo.upper()}")
+print(f"\n🏆 Performance Summary - {config.optimization.route_algorithm.upper()}")
 print(f"   Peak Coverage: {peak_coverage:.1f}%")
 print(f"   Global Average: {global_avg:.1f}%")
 print(f"   Window Average: {rolling_avg:.1f}% (last 240s)")

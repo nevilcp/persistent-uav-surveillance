@@ -5,7 +5,6 @@ optimal fleet composition (active + spare UAVs) subject to cost
 constraints and spare floor requirements.
 """
 
-from typing import Tuple, Optional
 from dataclasses import dataclass
 
 # Configuration helper (only spare ratio needed for now)
@@ -134,7 +133,6 @@ def optimize_fleet_enhanced(
     Returns:
         FleetOptimizationResult with rotation/contingency breakdown
     """
-    import math
 
     if K_inv <= 0:
         raise ValueError("K_inv must be positive")
@@ -202,7 +200,7 @@ def _optimize_fleet_size_milp(
     C_L: float,
     C_S: float,
     solver: str = "glpk",
-) -> Optional[FleetOptimizationResult]:
+) -> FleetOptimizationResult | None:
     """Solve fleet sizing problem using Pyomo if available.
 
     Falls back to *None* if Pyomo or the desired solver backend is not
@@ -213,11 +211,11 @@ def _optimize_fleet_size_milp(
         # need the closed-form solution.
         from pyomo.environ import (
             ConcreteModel,
-            Var,
-            Objective,
             Constraint,
             NonNegativeIntegers,
+            Objective,
             SolverFactory,
+            Var,
             minimize,
             value,
         )
@@ -242,12 +240,12 @@ def _optimize_fleet_size_milp(
         return None
 
     try:
-        res = opt.solve(m, tee=False)
-    except Exception:
+        opt.solve(m, tee=False)
+    except Exception:  # noqa: BLE001 - solver backend errors vary, treat any as infeasible
         return None
 
-    n_launch = int(round(value(m.n_L)))
-    n_spare = int(round(value(m.n_S)))
+    n_launch = round(value(m.n_L))
+    n_spare = round(value(m.n_S))
 
     # Check feasibility again (robust) and cost
     if n_launch < 0 or n_spare < 0 or n_launch + n_spare != K_inv:
@@ -328,8 +326,8 @@ def optimize_fleet_from_config(
 # Make it explicit for * import users
 __all__ = [
     "FleetOptimizationResult",
-    "optimize_fleet_size",
     "optimize_fleet_enhanced",
     "optimize_fleet_from_config",
+    "optimize_fleet_size",
     "validate_fleet_configuration",
 ]

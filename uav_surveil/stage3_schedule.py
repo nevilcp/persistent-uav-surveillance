@@ -5,15 +5,14 @@ Staggers route departures to spread coverage over the revisit window Θ.
 
 from __future__ import annotations
 
-from typing import List, Tuple
 from dataclasses import dataclass
 
-from .core.route import Route
 from .config.parameters import SystemParameters
+from .core.route import Route
 
 __all__ = [
-    "pack_departures_staggered",
     "ScheduleSummary",
+    "pack_departures_staggered",
 ]
 
 
@@ -32,7 +31,7 @@ class ScheduleSummary:
 
 
 def pack_departures_staggered(
-    routes: List[Route],
+    routes: list[Route],
     max_revisit_gap: float,
     swap_slot: float = 60.0,
     batch_size: int = 4,
@@ -57,9 +56,6 @@ def pack_departures_staggered(
 
     # Batch scheduler v2: Spread departures to prevent simultaneous battery drain
     # Strategy: Launch batches with longer gaps to stagger when UAVs need to return
-
-    # Calculate how many batches we need
-    num_batches = (n + batch_size - 1) // batch_size  # ceiling division
 
     for i, route in enumerate(routes):
         batch_idx = i // batch_size
@@ -92,7 +88,7 @@ def pack_departures_staggered(
     return ScheduleSummary(longest_loop, n_surge, β_adapt)
 
 
-def _peak_swap_concurrency(routes: List[Route], swap_slot: float, t_cyc: float) -> int:
+def _peak_swap_concurrency(routes: list[Route], swap_slot: float, t_cyc: float) -> int:
     """Maximum number of routes with an overlapping swap window at once.
 
     Each route u occupies the pad for `swap_slot` seconds starting at
@@ -100,7 +96,7 @@ def _peak_swap_concurrency(routes: List[Route], swap_slot: float, t_cyc: float) 
     loop). Windows starting within one T_cyc of the schedule are enough to
     capture the steady-state overlap pattern (it repeats every T_cyc).
     """
-    events: List[Tuple[float, int]] = []
+    events: list[tuple[float, int]] = []
     for route in routes:
         d_u = route.departure_time or 0.0
         l_u = route.loop_time or 0.0
@@ -133,7 +129,7 @@ def _peak_swap_concurrency(routes: List[Route], swap_slot: float, t_cyc: float) 
 
 def schedule_from_config(
     config: SystemParameters,
-    routes: List[Route],
+    routes: list[Route],
 ):
     """Pack departures using parameters from *SystemParameters*."""
 

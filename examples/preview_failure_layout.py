@@ -1,4 +1,5 @@
-import os, sys
+import os
+import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 
@@ -6,7 +7,6 @@ import matplotlib
 
 matplotlib.use("Agg")  # headless
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 
 from uav_surveil.config import load_scenario
 
@@ -18,7 +18,6 @@ def draw_layout(ax, cfg):
     depot_x = cfg.mission.depot_x
     depot_y = cfg.mission.depot_y
     origin_x, origin_y = cfg.grid.origin
-    cell_size = cfg.grid.cell_size
 
     xmin = min(depot_x, origin_x) - 50
     xmax = max(depot_x, origin_x + area_w) + 50
@@ -53,7 +52,7 @@ def save_preview(out_path: str, banner_text: str) -> None:
     os.makedirs("results", exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    xmin, ymin = draw_layout(ax, cfg)
+    _xmin, _ymin = draw_layout(ax, cfg)
 
     # Failure banner at bottom center (same style as visualizer)
     fig.text(
@@ -64,7 +63,7 @@ def save_preview(out_path: str, banner_text: str) -> None:
         ha="center",
         fontsize=8,
         color="purple",
-        bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.7),
+        bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.7},
     )
 
     plt.tight_layout()

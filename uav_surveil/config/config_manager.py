@@ -4,19 +4,17 @@ This module provides convenient methods for loading configurations,
 running parameter studies, and integrating with existing modules.
 """
 
-from pathlib import Path
-from typing import Dict, List, Optional, Union
-import json
 from datetime import datetime
+from pathlib import Path
 
 from .parameters import SystemParameters
-from .scenarios import load_scenario, list_available_scenarios, create_parameter_sweep
+from .scenarios import create_parameter_sweep, list_available_scenarios, load_scenario
 
 
 class ConfigManager:
     """Centralized configuration management for UAV surveillance system."""
 
-    def __init__(self, config_dir: Path = None):
+    def __init__(self, config_dir: Path | None = None):
         """Initialize configuration manager.
 
         Args:
@@ -24,10 +22,10 @@ class ConfigManager:
         """
         self.config_dir = config_dir or Path("configs")
         self.config_dir.mkdir(exist_ok=True)
-        self._current_config: Optional[SystemParameters] = None
+        self._current_config: SystemParameters | None = None
 
     def load_config(
-        self, source: Union[str, Path, SystemParameters]
+        self, source: str | Path | SystemParameters
     ) -> SystemParameters:
         """Load configuration from various sources.
 
@@ -52,7 +50,7 @@ class ConfigManager:
         elif isinstance(source, Path):
             self._current_config = SystemParameters.load_from_file(source)
         else:
-            raise ValueError(f"Unsupported config source type: {type(source)}")
+            raise TypeError(f"Unsupported config source type: {type(source)}")
 
         return self._current_config
 
@@ -70,7 +68,7 @@ class ConfigManager:
         return self._current_config
 
     def save_config(
-        self, config: Optional[SystemParameters] = None, filename: Optional[str] = None
+        self, config: SystemParameters | None = None, filename: str | None = None
     ) -> Path:
         """Save configuration to file.
 
@@ -85,27 +83,27 @@ class ConfigManager:
             config = self.get_current_config()
 
         if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
             filename = f"{config.config_name}_{timestamp}.json"
 
         filepath = self.config_dir / filename
         config.save_to_file(filepath)
         return filepath
 
-    def list_scenarios(self) -> List[str]:
+    def list_scenarios(self) -> list[str]:
         """List all available predefined scenarios."""
         return list_available_scenarios()
 
-    def list_saved_configs(self) -> List[Path]:
+    def list_saved_configs(self) -> list[Path]:
         """List all saved configuration files."""
         return list(self.config_dir.glob("*.json"))
 
     def create_study_configs(
         self,
         base_scenario: str,
-        parameter_studies: Dict[str, List[float]],
+        parameter_studies: dict[str, list[float]],
         study_name: str = "parameter_study",
-    ) -> List[SystemParameters]:
+    ) -> list[SystemParameters]:
         """Create configurations for parameter sensitivity studies.
 
         Args:
@@ -136,7 +134,7 @@ class ConfigManager:
 
         return all_configs
 
-    def validate_config(self, config: Optional[SystemParameters] = None) -> List[str]:
+    def validate_config(self, config: SystemParameters | None = None) -> list[str]:
         """Validate configuration consistency.
 
         Args:
@@ -150,7 +148,7 @@ class ConfigManager:
 
         return config.validate_consistency()
 
-    def print_config_summary(self, config: Optional[SystemParameters] = None) -> None:
+    def print_config_summary(self, config: SystemParameters | None = None) -> None:
         """Print human-readable configuration summary.
 
         Args:
@@ -170,7 +168,7 @@ class ConfigManager:
 
     # Convenience methods for specific modules
 
-    def get_stage0_params(self, config: Optional[SystemParameters] = None) -> Dict:
+    def get_stage0_params(self, config: SystemParameters | None = None) -> dict:
         """Get parameters for Stage 0 battery optimization.
 
         Args:
@@ -184,7 +182,7 @@ class ConfigManager:
 
         return config.get_battery_constraint_params()
 
-    def get_stage1_params(self, config: Optional[SystemParameters] = None) -> Dict:
+    def get_stage1_params(self, config: SystemParameters | None = None) -> dict:
         """Get parameters for Stage 1 grid generation.
 
         Args:
@@ -198,7 +196,7 @@ class ConfigManager:
 
         return config.get_grid_build_params()
 
-    def get_stage2_params(self, config: Optional[SystemParameters] = None) -> Dict:
+    def get_stage2_params(self, config: SystemParameters | None = None) -> dict:
         """Get parameters for Stage 2 fleet optimization.
 
         Args:
@@ -225,7 +223,7 @@ def get_config_manager() -> ConfigManager:
     return _global_config_manager
 
 
-def load_global_config(source: Union[str, Path, SystemParameters]) -> SystemParameters:
+def load_global_config(source: str | Path | SystemParameters) -> SystemParameters:
     """Load configuration into global manager.
 
     Args:

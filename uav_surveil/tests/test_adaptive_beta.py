@@ -7,16 +7,18 @@ Run with: py -m pytest uav_surveil/tests/test_adaptive_beta.py -v -s
 Or directly: py uav_surveil/tests/test_adaptive_beta.py
 """
 
-import sys, os
+import os
+import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+import copy
+
 from uav_surveil.config import load_scenario
+from uav_surveil.stage1_grid import build_grid_from_config
 from uav_surveil.stage2_fleet import optimize_fleet_from_config
 from uav_surveil.stage3_route_factory import get_route_generator
 from uav_surveil.stage3_schedule import schedule_from_config
-from uav_surveil.stage1_grid import build_grid_from_config
-import copy
 
 
 def test_adaptive_beta_effectiveness():
@@ -70,11 +72,11 @@ def test_adaptive_beta_effectiveness():
             print(f"   ✅ CHANGE: {spare_change:+d} spares (adaptive β working!)")
             changes_observed = True
         else:
-            print(f"   ⚪ NO CHANGE: discrete constraints limit adjustment")
+            print("   ⚪ NO CHANGE: discrete constraints limit adjustment")
 
     # Verify that adaptive β shows changes with larger fleets
     assert changes_observed, "Adaptive β should show changes with larger fleet sizes"
-    print(f"\n✅ Test passed: Adaptive β feedback working correctly!")
+    print("\n✅ Test passed: Adaptive β feedback working correctly!")
 
 
 if __name__ == "__main__":

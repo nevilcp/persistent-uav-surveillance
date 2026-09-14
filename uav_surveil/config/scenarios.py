@@ -4,16 +4,13 @@ This module provides common parameter sets for various surveillance scenarios,
 enabling quick setup for different research experiments and mission types.
 """
 
-from typing import Dict, List
+import copy
+import json
+from pathlib import Path
+
 from .parameters import (
     SystemParameters,
-    MissionParameters,
-    UAVParameters,
-    BatteryParameters,
 )
-import copy
-from pathlib import Path
-import json
 
 
 def get_baseline_config() -> SystemParameters:
@@ -208,7 +205,7 @@ def get_battery_study_config() -> SystemParameters:
 
 
 # Scenario registry
-_SCENARIOS: Dict[str, callable] = {
+_SCENARIOS: dict[str, callable] = {
     "baseline": get_baseline_config,
     "urban": get_urban_config,
     "rural": get_rural_config,
@@ -256,7 +253,7 @@ def load_scenario(scenario_name: str) -> SystemParameters:
     return _SCENARIOS[scenario_name]()
 
 
-def list_available_scenarios() -> List[str]:
+def list_available_scenarios() -> list[str]:
     """Get list of available predefined scenarios.
 
     Returns:
@@ -268,9 +265,9 @@ def list_available_scenarios() -> List[str]:
 def create_parameter_sweep(
     base_scenario: str,
     parameter_path: str,
-    values: List[float],
+    values: list[float],
     sweep_name: str = "parameter_sweep",
-) -> List[SystemParameters]:
+) -> list[SystemParameters]:
     """Create a parameter sweep for sensitivity analysis.
 
     Args:
@@ -309,7 +306,7 @@ def create_parameter_sweep(
     return configurations
 
 
-def compare_scenarios(scenario1: str, scenario2: str) -> Dict[str, any]:
+def compare_scenarios(scenario1: str, scenario2: str) -> dict[str, any]:
     """Compare two scenarios and highlight differences.
 
     Args:

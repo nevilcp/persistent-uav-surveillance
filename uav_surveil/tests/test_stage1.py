@@ -1,4 +1,3 @@
-import pytest
 from uav_surveil.config import load_scenario
 from uav_surveil.stage1_grid import build_grid_from_config, validate_grid_coverage
 

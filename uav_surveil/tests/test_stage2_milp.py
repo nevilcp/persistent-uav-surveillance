@@ -1,6 +1,7 @@
 """Tests for MILP-backed fleet sizing (Stage 2)."""
 
 import math
+
 from uav_surveil.config import load_scenario
 from uav_surveil.stage2_fleet import (
     optimize_fleet_from_config,

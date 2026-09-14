@@ -4,17 +4,18 @@ Provides detailed route analysis, coverage gap detection, and performance compar
 """
 
 import csv
-from typing import List, Dict, Any, Sequence, Tuple, Optional
-from math import hypot
-from datetime import datetime
 import os
+from collections.abc import Sequence
+from datetime import datetime
+from math import hypot
+from typing import Any
 
 from .core.cell import Cell
 from .core.route import Route
 
 
 def calculate_route_distance(
-    route: Route, cells: Sequence[Cell], depot: Tuple[float, float] = (-500.0, 0.0)
+    route: Route, cells: Sequence[Cell], depot: tuple[float, float] = (-500.0, 0.0)
 ) -> float:
     """Calculate total distance for a route including depot legs."""
     if not route.cell_sequence:
@@ -49,7 +50,7 @@ def calculate_route_distance(
     return total_distance
 
 
-def make_simulation_info(config, number: int) -> Dict[str, Any]:
+def make_simulation_info(config, number: int) -> dict[str, Any]:
     """Build the {number, algorithm, timestamp, base_name} info dict used to
     tag every CSV/plot output for a run.
 
@@ -66,7 +67,7 @@ def make_simulation_info(config, number: int) -> Dict[str, Any]:
             failure_tag = f"_FAIL-pos-u{trig.uav_id}"
         elif trig.kind == "soc" and trig.uav_id and trig.soc_threshold is not None:
             failure_tag = f"_FAIL-soc-u{trig.uav_id}-s{int(trig.soc_threshold*100)}"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
     base_name = f"sim_{number:03d}_{route_algo}{failure_tag}_{timestamp}"
 
     return {
@@ -78,11 +79,11 @@ def make_simulation_info(config, number: int) -> Dict[str, Any]:
 
 
 def log_route_analysis(
-    routes: List[Route],
+    routes: list[Route],
     cells: Sequence[Cell],
     algorithm_name: str,
     cruise_speed: float = 15.0,
-    depot: Tuple[float, float] = (-500.0, 0.0),
+    depot: tuple[float, float] = (-500.0, 0.0),
 ):
     """Detailed route analysis and logging."""
     print(f"\n📊 Route Analysis - {algorithm_name.upper()}")
@@ -126,11 +127,11 @@ def log_cell_coverage_gaps(
     cells: Sequence[Cell],
     current_time: float,
     threshold: float = 120.0,
-    filename: Optional[str] = None,
+    filename: str | None = None,
 ):
     """Analyze and log cells with coverage gaps."""
     if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
         filename = f"results/coverage_gaps_{timestamp}.csv"
 
     # Ensure simulations directory exists
@@ -194,7 +195,7 @@ def log_cell_coverage_gaps(
     print(f"   Coverage threshold: {threshold}s")
 
     if overdue_cells:
-        print(f"\n   📍 Overdue Cell Locations:")
+        print("\n   📍 Overdue Cell Locations:")
         for cell in sorted(
             overdue_cells,
             key=lambda c: current_time - (getattr(c, "last_seen_ts", None) or 0),
@@ -211,7 +212,7 @@ def log_cell_coverage_gaps(
         if len(overdue_cells) > 10:
             print(f"      ... and {len(overdue_cells) - 10} more")
 
-    print(f"\n   🗺️  Regional Coverage Gaps:")
+    print("\n   🗺️  Regional Coverage Gaps:")
     for region, stats in sorted(gap_analysis.items()):
         if stats["overdue"] > 0:
             pct = stats["overdue"] / stats["total"] * 100
@@ -225,9 +226,9 @@ def log_cell_coverage_gaps(
     return filename, overdue_cells
 
 
-def compare_algorithm_performance(results: Dict[str, Dict[str, Any]]):
+def compare_algorithm_performance(results: dict[str, dict[str, Any]]):
     """Compare performance metrics across different algorithms."""
-    print(f"\n🏆 Algorithm Performance Comparison")
+    print("\n🏆 Algorithm Performance Comparison")
     print("=" * 80)
     print(
         f"{'Algorithm':<12} {'Peak':<8} {'Rolling':<8} {'Min':<8} {'Overdue':<8} {'Loop Time':<10}"
@@ -248,10 +249,10 @@ def compare_algorithm_performance(results: Dict[str, Dict[str, Any]]):
     print("=" * 80)
 
 
-def track_uav_routes(uavs, current_time: float, filename: Optional[str] = None):
+def track_uav_routes(uavs, current_time: float, filename: str | None = None):
     """Track individual UAV route progress and assignments."""
     if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
         filename = f"results/uav_routes_{timestamp}.csv"
 
     # Ensure simulations directory exists
@@ -316,11 +317,11 @@ def track_uav_routes(uavs, current_time: float, filename: Optional[str] = None):
 
 
 def analyze_spare_utilization(
-    simulation_logs: List[str], filename: Optional[str] = None
+    simulation_logs: list[str], filename: str | None = None
 ):
     """Analyze spare launch patterns and timing from simulation logs."""
     if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
         filename = f"results/spare_analysis_{timestamp}.csv"
 
     spare_launches = []
@@ -365,7 +366,7 @@ def analyze_spare_utilization(
                 ]
             )
 
-    print(f"\n🔄 Spare Utilization Analysis")
+    print("\n🔄 Spare Utilization Analysis")
     print(f"   Successful launches: {len(spare_launches)}")
     print(f"   Skipped launches: {len(skipped_launches)}")
     print(f"   Analysis saved: {filename}")

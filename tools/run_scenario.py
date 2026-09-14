@@ -19,9 +19,9 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 
+from uav_surveil.analysis_tools import make_simulation_info
 from uav_surveil.config import load_scenario
 from uav_surveil.gss.simulation import GSSSimulation
-from uav_surveil.analysis_tools import make_simulation_info
 
 
 def main() -> None:

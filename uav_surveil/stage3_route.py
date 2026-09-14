@@ -8,16 +8,16 @@ factory method.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence
 
+from .config.parameters import SystemParameters
 from .core.cell import Cell
 from .core.route import Route
-from .config.parameters import SystemParameters
 
 __all__ = [
-    "generate_routes_greedy",
     "RouteSetSummary",
+    "generate_routes_greedy",
 ]
 
 
@@ -26,7 +26,7 @@ class RouteSetSummary:
     """Lightweight stats object returned alongside the route list."""
 
     n_routes: int
-    cells_per_route: List[int]
+    cells_per_route: list[int]
     longest_loop_time: float
 
 
@@ -35,7 +35,7 @@ class RouteSetSummary:
 # ---------------------------------------------------------------------------
 
 
-def _serpentine_order(cells: Sequence[Cell]) -> List[Cell]:
+def _serpentine_order(cells: Sequence[Cell]) -> list[Cell]:
     """Return cells sorted in serpentine lawn-mower order.
 
     Works by grouping cells by *y* (row) then alternating X ordering on every
@@ -48,7 +48,7 @@ def _serpentine_order(cells: Sequence[Cell]) -> List[Cell]:
         rows.setdefault(c.y, []).append(c)
 
     ordered_rows = sorted(rows.items(), key=lambda kv: kv[0])  # ascending y
-    result: List[Cell] = []
+    result: list[Cell] = []
 
     for i, (_, row_cells) in enumerate(ordered_rows):
         row_sorted = sorted(row_cells, key=lambda c: c.x, reverse=bool(i % 2))
@@ -57,7 +57,7 @@ def _serpentine_order(cells: Sequence[Cell]) -> List[Cell]:
     return result
 
 
-def _chunk(lst: List[Cell], k: int) -> List[List[Cell]]:
+def _chunk(lst: list[Cell], k: int) -> list[list[Cell]]:
     """Split *lst* into *k* nearly-equal consecutive chunks."""
 
     n = len(lst)
@@ -82,7 +82,7 @@ def generate_routes_greedy(
     n_launch: int,
     cruise_speed: float,
     depot: tuple[float, float] = (0.0, 0.0),
-) -> tuple[List[Route], RouteSetSummary]:
+) -> tuple[list[Route], RouteSetSummary]:
     """Generate routes using serpentine sweep + even split.
 
     Args:
@@ -104,7 +104,7 @@ def generate_routes_greedy(
     # 2. Chunk into n_launch sub-lists
     cell_chunks = _chunk(ordered, n_launch)
 
-    routes: List[Route] = []
+    routes: list[Route] = []
     longest_loop = 0.0
     cell_size_est = abs(ordered[0].x - ordered[1].x) if len(ordered) > 1 else 0.0
 

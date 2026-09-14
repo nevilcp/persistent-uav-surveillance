@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
-import zipfile
 
 ROOT = Path.cwd()
 SIM_DIR = ROOT / "results"
@@ -16,20 +15,20 @@ OUT_DIR.mkdir(exist_ok=True)
 @dataclass
 class RunArtifacts:
     tag_prefix: str
-    base: Optional[Path]
-    metrics: Optional[Path]
-    soc_series: Optional[Path]
-    recovery_metrics: Optional[Path]
-    coverage_snaps: List[Path]
-    final_coverage: Optional[Path]
-    figures: Dict[str, Path]
+    base: Path | None
+    metrics: Path | None
+    soc_series: Path | None
+    recovery_metrics: Path | None
+    coverage_snaps: list[Path]
+    final_coverage: Path | None
+    figures: dict[str, Path]
 
 
-def _latest(paths: List[Path]) -> Optional[Path]:
+def _latest(paths: list[Path]) -> Path | None:
     return max(paths, key=lambda p: p.stat().st_mtime) if paths else None
 
 
-def _find_run_by_prefix(prefix: str) -> Optional[RunArtifacts]:
+def _find_run_by_prefix(prefix: str) -> RunArtifacts | None:
     m = sorted(SIM_DIR.glob(f"{prefix}*_metrics.csv"))
     m = [p for p in m if not p.name.endswith("_recovery_metrics.csv")] or m
     if not m:
@@ -53,7 +52,7 @@ def _find_run_by_prefix(prefix: str) -> Optional[RunArtifacts]:
         "revisit_hist_late",
         "soc_traces",
     ]
-    figs: Dict[str, Path] = {}
+    figs: dict[str, Path] = {}
     for ft in fig_types:
         candidates = list(FIG_DIR.glob(f"{base.name}*_{ft}.png"))
         sel = _latest(candidates)
@@ -72,7 +71,7 @@ def _find_run_by_prefix(prefix: str) -> Optional[RunArtifacts]:
     )
 
 
-def _zip_pack(name: str, files: List[Path], manifest_rows: List[str]) -> Path:
+def _zip_pack(name: str, files: list[Path], manifest_rows: list[str]) -> Path:
     zip_path = OUT_DIR / f"{name}.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr("MANIFEST.txt", "\n".join(manifest_rows) + "\n")
@@ -82,17 +81,17 @@ def _zip_pack(name: str, files: List[Path], manifest_rows: List[str]) -> Path:
     return zip_path
 
 
-def build_packs(prefixes: List[str]) -> Dict[str, Dict[str, str]]:
-    index: Dict[str, Dict[str, str]] = {}
+def build_packs(prefixes: list[str]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
     for pref in prefixes:
         art = _find_run_by_prefix(pref)
         if art is None:
             print(f"No artifacts found for prefix '{pref}'")
             continue
-        files: List[Path] = []
-        manifest: List[str] = []
+        files: list[Path] = []
+        manifest: list[str] = []
 
-        def add(p: Optional[Path], label: str):
+        def add(p: Path | None, label: str, files=files, manifest=manifest):
             if p is None:
                 return
             files.append(p)

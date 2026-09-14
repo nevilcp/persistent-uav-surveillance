@@ -2,10 +2,10 @@ from uav_surveil.config import load_scenario
 from uav_surveil.stage1_grid import build_grid_from_config
 from uav_surveil.stage3_route import generate_routes_from_config
 from uav_surveil.stage3_route_roundrobin import (
-    generate_routes_roundrobin,
-    _serpentine_order,
     _pick_seeds,
     _route_time,
+    _serpentine_order,
+    generate_routes_roundrobin,
 )
 
 
@@ -90,7 +90,7 @@ class TestRoundRobinSerpentine:
             / n_launch
         ) ** 0.5
 
-        routes, summary = generate_routes_roundrobin(
+        _routes, summary = generate_routes_roundrobin(
             cells, n_launch, speed, depot, True, buse
         )
         assert summary["loop_time_std"] <= unsmoothed_std + 1e-9

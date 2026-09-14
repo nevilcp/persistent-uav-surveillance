@@ -20,10 +20,8 @@ This can be refactored later once the action/event bus is introduced.
 
 from __future__ import annotations
 
-from typing import List
-
-from .core.uav import UAV, UAVState
 from .config.parameters import SystemParameters
+from .core.uav import UAV, UAVState
 
 __all__ = [
     "apply_policy",
@@ -80,7 +78,7 @@ def get_distance_aware_threshold(
 
 
 def apply_policy(
-    uavs: List[UAV], current_time: float, config: SystemParameters
+    uavs: list[UAV], current_time: float, config: SystemParameters
 ) -> None:
     """Apply enhanced rule-based Stage-4 policy with distance-aware battery threshold.
 
