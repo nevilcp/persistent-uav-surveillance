@@ -13,7 +13,6 @@
   },
   "uav": {
     "cruise_speed": 6.0,
-    "max_speed": 9.0,
     "flight_altitude": 50.0
   },
   "battery": {
@@ -22,12 +21,15 @@
     "soc_floor": 0.1,
     "soc_return_threshold": 0.25,
     "hot_swap_time": 60.0,
-    "charging_time": 3600.0
+    "charging_time": 3600.0,
+    "prelaunch_margin": 0.05
   },
   "grid": {
     "cell_size": 40.0,
-    "coverage_overlap": 0.1,
-    "origin": [0.0, 0.0],
+    "origin": [
+      0.0,
+      0.0
+    ],
     "priority_zones": {},
     "exclusion_zones": []
   },
@@ -49,7 +51,11 @@
   },
   "failure": {
     "enabled": false,
-    "trigger": { "kind": "time", "uav_id": "03", "t_s": 1800 },
+    "trigger": {
+      "kind": "time",
+      "uav_id": "03",
+      "t_s": 1800
+    },
     "bridge_policy": {
       "realloc_k": 2,
       "realloc_horizon_s": 120.0,
@@ -58,7 +64,6 @@
       "min_hold_time_s": 60.0,
       "max_inserts_per_uav": 1,
       "max_detour_ratio": 0.2,
-      "prelaunch_margin": 0.05,
       "handover_grace_s": 15.0
     }
   },
@@ -66,7 +71,6 @@
     "max_revisit_gap": 180.0,
     "snapshot_period_s": 120.0,
     "spare_launch_deadline": 1.0,
-    "orphan_recovery_slack": 10.0,
     "robustness_warning_threshold": 5.0,
     "robustness_critical_threshold": 1.0
   },

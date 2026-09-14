@@ -242,7 +242,7 @@ class GSSSimulation:
                     self.cells,
                     fleet_result.n_launch,
                     self.config.uav.cruise_speed,
-                    (-500.0, 0.0),  # depot coordinates
+                    (self.config.mission.depot_x, self.config.mission.depot_y),
                     furthest_first,
                     buse_s=self.config.battery.usable_endurance,
                 )
@@ -323,18 +323,19 @@ class GSSSimulation:
                 f"   📈 Spare ratio: {fleet_result.spare_ratio:.3f} → {fleet_result_adaptive.spare_ratio:.3f}"
             )
 
-            # Keep the *route count* as the launch target.  If adaptive β increased
-            # n_launch beyond the number of generated routes, treat those extra
-            # vehicles as additional spares so we don’t create ‘active’ UAVs
-            # without a route (which was causing the misleading “17 active” HUD).
+            # Keep the *route count* as the launch target, moving any
+            # difference from adaptive β into the spare count instead. This
+            # keeps every generated route assigned to a UAV: too many active
+            # slots left routes-less "active" UAVs (misleading HUD); too few
+            # left generated routes with no UAV ever assigned to fly them.
 
             # NOTE: len(self.routes) is fixed by the route generator call earlier.
             launch_target = len(self.routes)
-            if fleet_result_adaptive.n_launch > launch_target:
+            if fleet_result_adaptive.n_launch != launch_target:
                 spare_adjust = fleet_result_adaptive.n_launch - launch_target
                 fleet_result_adaptive = fleet_result_adaptive.__class__(
                     n_launch=launch_target,
-                    n_spare=fleet_result_adaptive.n_spare + spare_adjust,
+                    n_spare=max(0, fleet_result_adaptive.n_spare + spare_adjust),
                     n_rotation=getattr(fleet_result_adaptive, "n_rotation", 0),
                     n_contingency=getattr(fleet_result_adaptive, "n_contingency", 0),
                     total_cost=fleet_result_adaptive.total_cost,
@@ -810,10 +811,11 @@ class GSSSimulation:
                         )
 
         # Evaluate outstanding alarms
+        deadline = self.config.stl.spare_launch_deadline
         for uav in self.uavs:
             if getattr(uav, "_alarm_raised", False):
-                # considered satisfied if a spare launched at or before alarm_time+1
-                if self.metrics.current_time - uav._alarm_time > 1.0:
+                # considered satisfied if a spare launched within the deadline
+                if self.metrics.current_time - uav._alarm_time > deadline:
                     # find any spare launched corresponding? If not already marked missed
                     if not getattr(uav, "_alarm_checked", False):
                         self.metrics.c3_missed += 1
@@ -824,17 +826,18 @@ class GSSSimulation:
     # Battery helper
     # ---------------------------------------------------------------------
 
+    def _usable_range_m(self) -> float:
+        """Usable flight range (m) = cruise_speed * usable_endurance."""
+        return self.config.uav.cruise_speed * self.config.battery.usable_endurance
+
     def _consume_battery(self, uav: UAV, distance_m: float) -> None:
         """Reduce UAV SoC based on distance travelled.
 
-        A simple linear model: usable range (m) = cruise_speed * usable_endurance.
-        SoC fraction consumed = distance / usable_range.
+        A simple linear model: SoC fraction consumed = distance / usable_range.
         """
         if distance_m == 0:
             return
-        usable_range = (
-            self.config.uav.cruise_speed * self.config.battery.usable_endurance
-        )
+        usable_range = self._usable_range_m()
         if usable_range <= 0:
             return
         uav.soc = max(0.0, uav.soc - distance_m / usable_range)
@@ -1140,17 +1143,18 @@ class GSSSimulation:
 
                 # Estimate SoC when reaching depot (rough approximation)
                 # Assume linear SoC consumption based on distance
-                battery_range = getattr(
-                    self.config.battery, "max_range", 10000.0
-                )  # meters per full battery
-                soc_consumption_per_meter = 1.0 / battery_range
+                usable_range = self._usable_range_m()
+                soc_consumption_per_meter = (
+                    1.0 / usable_range if usable_range > 0 else 0.0
+                )
                 estimated_soc_at_depot = uav.soc - (
                     distance_to_depot * soc_consumption_per_meter
                 )
 
                 # Pre-launch if UAV will hit threshold before depot or just after
                 if (
-                    estimated_soc_at_depot <= threshold + 0.02  # 2% margin
+                    estimated_soc_at_depot
+                    <= threshold + self.config.battery.prelaunch_margin
                     and distance_to_depot > 200.0  # Don't pre-launch if very close
                     and not getattr(uav, "_prelaunch_triggered", False)
                 ):

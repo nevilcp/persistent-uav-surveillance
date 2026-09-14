@@ -13,7 +13,6 @@
   },
   "uav": {
     "cruise_speed": 4.0,
-    "max_speed": 6.0,
     "flight_altitude": 50.0
   },
   "battery": {
@@ -26,7 +25,6 @@
   },
   "grid": {
     "cell_size": 40.0,
-    "coverage_overlap": 0.1,
     "priority_zones": {},
     "exclusion_zones": []
   },
@@ -43,7 +41,6 @@
   "stl": {
     "max_revisit_gap": 120.0,
     "spare_launch_deadline": 1.0,
-    "orphan_recovery_slack": 10.0,
     "robustness_warning_threshold": 5.0,
     "robustness_critical_threshold": 1.0
   },

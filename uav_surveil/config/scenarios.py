@@ -102,7 +102,6 @@ def get_rural_config() -> SystemParameters:
     # Relaxed STL contracts for rural environment
     config.stl.max_revisit_gap = 180.0
     config.stl.spare_launch_deadline = 2.0
-    config.stl.orphan_recovery_slack = 20.0
 
     # Higher fleet budget for rural operations
     config.optimization.max_fleet_budget = 2000000.0
@@ -170,7 +169,6 @@ def get_performance_test_config() -> SystemParameters:
     # Tight STL contracts
     config.stl.max_revisit_gap = 60.0
     config.stl.spare_launch_deadline = 0.3
-    config.stl.orphan_recovery_slack = 5.0
 
     # High-budget fleet
     config.optimization.max_fleet_budget = 5000000.0

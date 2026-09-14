@@ -28,6 +28,9 @@ class _FakeSim:
         self.uavs = []
         self.cell_lookup = {}
 
+    def _usable_range_m(self) -> float:
+        return self.config.uav.cruise_speed * self.config.battery.usable_endurance
+
 
 def _make_failed(sim, cell_ids):
     route = Route(id="f_route", cell_sequence=cell_ids, loop_time=200.0)

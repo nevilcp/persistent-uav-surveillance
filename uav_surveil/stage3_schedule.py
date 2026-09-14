@@ -82,12 +82,50 @@ def pack_departures_staggered(
 
     longest_loop = max((r.loop_time or 0.0) for r in routes)
 
-    # Estimate simultaneous pads demand
-    n_surge = int((swap_slot / longest_loop) * n) + 1
+    # True peak pad demand: sweep-line over every route's actual swap
+    # windows [d_u + k*L_u, +swap_slot) for k=0,1,... while the window
+    # start is within one T_cyc (=longest_loop) of the schedule.
+    n_surge = _peak_swap_concurrency(routes, swap_slot, longest_loop)
 
     β_adapt = n_surge / (n + n_surge)
 
     return ScheduleSummary(longest_loop, n_surge, β_adapt)
+
+
+def _peak_swap_concurrency(routes: List[Route], swap_slot: float, t_cyc: float) -> int:
+    """Maximum number of routes with an overlapping swap window at once.
+
+    Each route u occupies the pad for `swap_slot` seconds starting at
+    d_u + k*L_u for k=0,1,... (its own departure phase, repeating every
+    loop). Windows starting within one T_cyc of the schedule are enough to
+    capture the steady-state overlap pattern (it repeats every T_cyc).
+    """
+    events: List[Tuple[float, int]] = []
+    for route in routes:
+        d_u = route.departure_time or 0.0
+        l_u = route.loop_time or 0.0
+        if l_u <= 0:
+            continue
+        k = 0
+        start = d_u
+        while start < t_cyc + swap_slot:
+            events.append((start, 1))
+            events.append((start + swap_slot, -1))
+            k += 1
+            start = d_u + k * l_u
+
+    if not events:
+        return 1
+
+    # Process window-end events before start events at the same timestamp
+    # so back-to-back (non-overlapping) windows aren't double-counted.
+    events.sort(key=lambda e: (e[0], e[1]))
+    concurrency = 0
+    peak = 0
+    for _, delta in events:
+        concurrency += delta
+        peak = max(peak, concurrency)
+    return max(peak, 1)
 
 
 # Convenience wrapper

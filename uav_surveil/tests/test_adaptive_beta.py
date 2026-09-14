@@ -9,8 +9,6 @@ Or directly: py uav_surveil/tests/test_adaptive_beta.py
 
 import sys, os
 
-import pytest
-
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from uav_surveil.config import load_scenario
@@ -21,10 +19,6 @@ from uav_surveil.stage1_grid import build_grid_from_config
 import copy
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing dev-era test; thresholds drifted from current defaults. "
-    "Thesis canonical runs (sim_020/023/024/025/026) use scenario JSONs and are unaffected."
-)
 def test_adaptive_beta_effectiveness():
     """Test that adaptive β feedback works correctly with different inventory sizes."""
     config = load_scenario("baseline")

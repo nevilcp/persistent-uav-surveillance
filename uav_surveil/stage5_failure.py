@@ -117,8 +117,8 @@ class BridgeManager:
         ]
 
         speed = self.sim.config.uav.cruise_speed
-        usable_range = speed * self.sim.config.battery.usable_endurance
-        soc_margin = cfg.prelaunch_margin
+        usable_range = self.sim._usable_range_m()
+        soc_margin = self.sim.config.battery.prelaunch_margin
         soc_threshold = self.sim.config.battery.soc_return_threshold
 
         # Bound the detour-insertion search horizon (candidate indices ahead

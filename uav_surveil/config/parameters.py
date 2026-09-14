@@ -45,22 +45,12 @@ class UAVParameters(BaseModel):
     cruise_speed: float = Field(
         default=6.0, ge=0.5, le=20.0, description="UAV cruise velocity (m/s)"
     )
-    max_speed: float = Field(
-        default=8.0, ge=0.5, le=30.0, description="UAV maximum velocity (m/s)"
-    )
     flight_altitude: float = Field(
         default=50.0,
         ge=10.0,
         le=150.0,
         description="Standard flight altitude above ground (m)",
     )
-
-    @field_validator("max_speed")
-    @classmethod
-    def validate_max_speed(cls, v, info):
-        if "cruise_speed" in info.data and v < info.data["cruise_speed"]:
-            raise ValueError("Max speed must be >= cruise speed")
-        return v
 
 
 class BatteryParameters(BaseModel):
@@ -102,6 +92,12 @@ class BatteryParameters(BaseModel):
         le=14400.0,
         description="Full battery charging time (seconds)",
     )
+    prelaunch_margin: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=0.2,
+        description="Stage 4 ETA pre-launch SoC margin epsilon (fraction)",
+    )
 
     @field_validator("usable_endurance")
     @classmethod
@@ -116,12 +112,6 @@ class GridParameters(BaseModel):
 
     cell_size: float = Field(
         default=40.0, ge=10.0, le=200.0, description="Grid cell side length (m)"
-    )
-    coverage_overlap: float = Field(
-        default=0.1,
-        ge=0.0,
-        le=0.5,
-        description="Coverage overlap between adjacent cells (fraction)",
     )
     priority_zones: Dict[str, float] = Field(
         default_factory=dict,
@@ -272,12 +262,6 @@ class BridgePolicyConfig(BaseModel):
         le=0.5,
         description="Max detour as fraction of remaining loop",
     )
-    prelaunch_margin: float = Field(
-        default=0.05,
-        ge=0.0,
-        le=0.2,
-        description="Extra SoC margin beyond return threshold",
-    )
     handover_grace_s: float = Field(
         default=15.0,
         ge=0.0,
@@ -308,11 +292,6 @@ class STLParameters(BaseModel):
     # C-3: Spare launch contract
     spare_launch_deadline: float = Field(
         default=1.0, ge=0.1, le=10.0, description="Spare launch deadline (seconds)"
-    )
-
-    # C-4: Orphan recovery contract
-    orphan_recovery_slack: float = Field(
-        default=10.0, ge=1.0, le=60.0, description="Orphan recovery slack ε (seconds)"
     )
 
     # Robustness monitoring
@@ -485,7 +464,6 @@ Grid Configuration:
 STL Contracts:
   • Max revisit gap: {self.stl.max_revisit_gap}s
   • Spare launch deadline: {self.stl.spare_launch_deadline}s
-  • Recovery slack: {self.stl.orphan_recovery_slack}s
 
 Fleet Budget:
   • Max budget: ${self.optimization.max_fleet_budget:,.0f}

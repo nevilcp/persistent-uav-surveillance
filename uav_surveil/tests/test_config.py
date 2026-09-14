@@ -58,10 +58,6 @@ class TestSystemParameters:
         with pytest.raises((ValueError, ValidationError)):
             SystemParameters(mission=MissionParameters(area_width=-100))
 
-        # Test invalid speed relationship
-        with pytest.raises((ValueError, ValidationError)):
-            SystemParameters(uav=UAVParameters(cruise_speed=10.0, max_speed=8.0))
-
         # Test invalid battery relationship
         with pytest.raises((ValueError, ValidationError)):
             SystemParameters(
@@ -382,13 +378,12 @@ class TestParameterValidation:
     def test_uav_parameter_validation(self):
         """Test UAV parameter validation."""
         # Valid parameters
-        params = UAVParameters(cruise_speed=5.0, max_speed=8.0)
+        params = UAVParameters(cruise_speed=5.0)
         assert params.cruise_speed == 5.0
-        assert params.max_speed == 8.0
 
-        # Invalid max_speed < cruise_speed
+        # Invalid: cruise_speed outside allowed range
         with pytest.raises(ValueError):
-            UAVParameters(cruise_speed=10.0, max_speed=8.0)
+            UAVParameters(cruise_speed=100.0)
 
     def test_battery_parameter_validation(self):
         """Test battery parameter validation."""
