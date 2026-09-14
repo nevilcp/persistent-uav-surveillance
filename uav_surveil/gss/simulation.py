@@ -14,6 +14,7 @@ and system performance metrics.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
@@ -29,6 +30,7 @@ from ..core.route import Route
 from ..core.uav import UAV, UAVState
 from ..config.config_manager import ConfigManager
 from ..config.parameters import SystemParameters
+from ..stage0_battery import optimize_battery_reserve
 from ..stage1_grid import build_grid_from_config
 from ..stage2_fleet import optimize_fleet_from_config
 from ..stage3_route_factory import get_route_generator
@@ -241,6 +243,43 @@ class GSSSimulation:
                 )
             print(f"   ✅ Generated {len(self.routes)} routes")
 
+            # Stage 0: Validate per-route battery feasibility (Alg. 5 line 4)
+            print("🟢 Stage 0: Validating battery feasibility per route...")
+            depot_x, depot_y = self.config.mission.depot_x, self.config.mission.depot_y
+            offending_routes = []
+            route_margins = []
+            for route in self.routes:
+                if not route.cell_sequence:
+                    continue
+                first_cell = self.cell_lookup[route.cell_sequence[0]]
+                d_ferry = math.hypot(first_cell.x - depot_x, first_cell.y - depot_y)
+                l_grid = 0.0
+                prev_cell = first_cell
+                for cid in route.cell_sequence[1:]:
+                    cell = self.cell_lookup[cid]
+                    l_grid += math.hypot(cell.x - prev_cell.x, cell.y - prev_cell.y)
+                    prev_cell = cell
+                battery_result = optimize_battery_reserve(
+                    d_ferry=d_ferry,
+                    l_grid=l_grid,
+                    v_max=self.config.uav.cruise_speed,
+                    endurance=self.config.battery.total_endurance,
+                    soc_floor=self.config.battery.soc_floor,
+                )
+                route_margins.append(battery_result.margin_seconds)
+                if not battery_result.is_feasible:
+                    offending_routes.append(route.id)
+            if offending_routes:
+                raise ValueError(
+                    f"Stage 0: {len(offending_routes)} route(s) exceed battery "
+                    f"endurance (2*d_ferry + l_grid > usable battery range): "
+                    f"{offending_routes}"
+                )
+            if route_margins:
+                print(
+                    f"   ✅ All routes battery-feasible, min margin: {min(route_margins):.1f}s"
+                )
+
             # Stage 3B: Schedule departures
             print("🟢 Stage 3B: Scheduling departures...")
             schedule_summary = schedule_from_config(self.config, self.routes)
@@ -400,6 +439,10 @@ class GSSSimulation:
             self._quiet_logging = bool(getattr(self.config.failure, "enabled", False))
             return True
 
+        except ValueError:
+            # Deliberate feasibility errors (e.g. Stage 0) must propagate to the caller.
+            self.state = SimulationState.ERROR
+            raise
         except Exception as e:
             print(f"❌ Simulation initialization failed: {e}")
             self.state = SimulationState.ERROR

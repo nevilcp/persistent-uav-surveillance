@@ -54,13 +54,8 @@ class TestBatteryOptimization:
         assert result.xi_optimal >= 0.0  # Should be non-negative
         assert result.is_feasible is True
 
-    @pytest.mark.xfail(
-        reason="Pre-existing dev-era test; xi_optimal off-by-precision vs current "
-        "optimize_battery_reserve. Stage-0 LP behaviour validated via thesis runs."
-    )
     def test_tight_mission_optimization(self):
-        """Test optimization with mission requiring exactly 90% battery."""
-        # Design mission that needs exactly 90% battery (10% reserve)
+        """A mission needing exactly 90% of range has zero deficit at soc_floor=0.1."""
         d_ferry = 500.0
         v_max = 4.0
         endurance = 2100.0
@@ -71,10 +66,10 @@ class TestBatteryOptimization:
 
         result = optimize_battery_reserve(d_ferry, l_grid, v_max, endurance)
 
-        # Should find exactly 10% reserve needed
-        assert abs(result.xi_optimal - 0.1) < 0.001
+        # Exactly at the usable-budget boundary: feasible, zero deficit.
+        assert result.xi_optimal == pytest.approx(0.0, abs=1e-9)
         assert result.is_feasible is True
-        assert result.utilization == 0.9
+        assert result.margin_seconds == pytest.approx(0.0, abs=1e-6)
 
     def test_impossible_mission(self):
         """Test mission that exceeds 100% battery capacity."""
@@ -87,92 +82,68 @@ class TestBatteryOptimization:
 
         # Total: 2*1000 + 8000 = 10000m > 8400m max capacity
         assert result.is_feasible is False
-        assert result.xi_optimal == 0.0  # Would need negative reserve
+        assert result.xi_optimal > 0.0  # Positive deficit, not clamped to 0
         assert result.margin_seconds < 0  # Negative margin
         assert result.margin_distance < 0
 
-    @pytest.mark.xfail(
-        reason="Pre-existing dev-era test; xi_max constraint behaviour drifted. "
-        "Stage-0 LP validated via thesis runs."
-    )
-    def test_exceeds_xi_max_constraint(self):
-        """Test mission requiring more reserve than allowed."""
+    def test_deficit_when_exceeding_budget(self):
+        """A mission beyond the usable battery budget reports a positive deficit."""
         result = optimize_battery_reserve(
             d_ferry=500.0,
-            l_grid=7000.0,  # Long grid requiring high reserve
+            l_grid=7000.0,
             v_max=4.0,
             endurance=2100.0,
-            xi_max=0.1,  # Only allow 10% max reserve
         )
 
-        # Total distance: 2*500 + 7000 = 8000m
-        # Max distance: 4*2100 = 8400m
-        # Required xi: 1 - 8000/8400 = 0.048 (4.8% reserve needed)
-        # This should actually be feasible with 10% limit
-        expected_xi = 1.0 - (8000.0 / 8400.0)
-        assert abs(result.xi_optimal - expected_xi) < 0.01
-        assert result.is_feasible is True  # Should be feasible
-        assert result.xi_optimal < 0.1  # Requires less than 10%
+        # d_need = 2*500 + 7000 = 8000m; d_usable = 4*2100*0.9 = 7560m -> infeasible.
+        expected_xi = 8000.0 / 8400.0 - 0.9
+        assert result.is_feasible is False
+        assert result.xi_optimal == pytest.approx(expected_xi, abs=1e-6)
+        assert result.margin_seconds < 0
 
-    @pytest.mark.xfail(
-        reason="Edge-case (zero distances) interpretation drifted in the LP; "
-        "thesis runs use realistic non-zero distances."
-    )
     def test_zero_distances(self):
         """Test optimization with zero distances."""
         result = optimize_battery_reserve(0.0, 0.0, 4.0, 2100.0)
 
-        # No distance required = no reserve needed
-        # xi = 1 - (0/8400) = 1.0, but clamped to max(0.0, 1.0) = 1.0 means 100% reserve
-        # This is actually correct - with 0 distance, we technically need 0% of battery
-        # So xi_optimal should be close to 0
-        assert result.xi_optimal == 0.0  # No reserve needed for zero distance
+        # No distance required = no deficit, fully feasible.
+        assert result.xi_optimal == 0.0
         assert result.is_feasible is True
-        assert result.utilization == 1.0
+        assert result.utilization == 0.0
+        assert result.margin_seconds == pytest.approx(2100.0 * 0.9)
 
 
 class TestBatteryAnalysis:
     """Test battery margin analysis functions."""
 
-    @pytest.mark.xfail(
-        reason="analyze_battery_margin return-tuple semantics drifted from "
-        "this dev-era test; functional behaviour validated via thesis runs."
-    )
     def test_analyze_battery_margin_safe(self):
-        """Test margin analysis for safe mission."""
+        """Test margin analysis for a feasible, well-within-budget mission."""
         required_xi, margin_seconds, is_safe = analyze_battery_margin(
             d_ferry=500.0,
             l_grid=1000.0,
             v_max=4.0,
             endurance=2100.0,
-            target_xi=0.3,  # 30% target reserve
+            target_xi=0.3,
         )
 
-        # Should be safe since mission only needs ~76% reserve
-        # For 500m ferry + 1000m grid = 2000m total
-        # With 8400m max capacity, xi = (8400-2000)/8400 = 0.762 (76.2%)
+        # d_need = 2000m, d_usable = 7560m -> feasible, zero deficit.
         assert is_safe is True
         assert margin_seconds > 0  # Positive margin
-        assert required_xi < 0.3  # Requires less than target
+        assert required_xi == 0.0
 
-    @pytest.mark.xfail(
-        reason="Same as test_analyze_battery_margin_safe: tuple semantics drift; "
-        "functional behaviour validated via thesis runs."
-    )
     def test_analyze_battery_margin_tight(self):
-        """Test margin analysis for tight mission."""
+        """Test margin analysis for a mission beyond the usable budget."""
         required_xi, margin_seconds, is_safe = analyze_battery_margin(
             d_ferry=500.0,
-            l_grid=6000.0,  # Long grid patrol
+            l_grid=7000.0,
             v_max=4.0,
             endurance=2100.0,
-            target_xi=0.1,  # Only 10% target reserve
+            target_xi=0.1,
         )
 
-        # Should be unsafe - requires more than 10% reserve
+        # d_need = 8000m, d_usable = 7560m -> infeasible, positive deficit.
         assert is_safe is False
         assert margin_seconds < 0  # Negative margin
-        assert required_xi > 0.1  # Requires more than target
+        assert required_xi > 0.0
 
 
 class TestBatteryFeasible:
@@ -284,3 +255,28 @@ class TestEstimateMissionTime:
         """Test with zero distances."""
         result = estimate_mission_time(0.0, 0.0, 4.0)
         assert result == 0.0
+
+
+class TestInitializeFeasibilityGate:
+    """Test that GSSSimulation.initialize() enforces Stage 0 per-route."""
+
+    def test_initialize_succeeds_on_feasible_config(self):
+        from ..config import get_test_config
+        from ..gss.simulation import GSSSimulation
+
+        sim = GSSSimulation(config=get_test_config())
+        assert sim.initialize() is True
+
+    def test_initialize_raises_on_infeasible_battery(self):
+        from ..config import get_test_config
+        from ..gss.simulation import GSSSimulation
+
+        config = get_test_config()
+        # Push the depot far from the grid at the endurance floor so every
+        # route's 2*d_ferry alone exceeds the usable battery budget.
+        config.battery.total_endurance = 300.0
+        config.mission.depot_x = -1000.0
+
+        sim = GSSSimulation(config=config)
+        with pytest.raises(ValueError, match="Stage 0"):
+            sim.initialize()

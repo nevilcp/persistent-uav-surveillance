@@ -15,14 +15,15 @@ if TYPE_CHECKING:
 
 @dataclass
 class BatteryOptimizationResult:
-    """Result of battery reserve optimization.
+    """Result of battery reserve deficit analysis.
 
     Attributes:
-        xi_optimal: Optimal battery reserve fraction (0-1)
+        xi_optimal: Battery deficit fraction (0 = feasible, >0 = shortfall
+            beyond the usable battery budget, per architecture.md §3)
         is_feasible: Whether mission is feasible within constraints
         margin_seconds: Time margin in seconds (positive = safe, negative = deficit)
         margin_distance: Distance margin in meters
-        utilization: Battery utilization percentage (1 - xi_optimal)
+        utilization: Fraction of usable battery distance the mission needs
     """
 
     xi_optimal: float
@@ -41,17 +42,17 @@ def optimize_battery_reserve(
     soc_floor: float = 0.1,
 ) -> BatteryOptimizationResult:
     """
-    Find minimum battery reserve needed for mission feasibility.
+    Compute the battery deficit slack ξ for a mission (architecture.md §3 /
+    thesis Alg. 2).
 
-    Implements the mathematical optimization:
-        min ξ
-        subject to: 2*d_ferry + l_grid ≤ (1-ξ) * v_max * endurance
-                    0 ≤ ξ ≤ xi_max
+        D_usable = v_max * endurance * (1 - soc_floor)
+        D_need   = 2*d_ferry + l_grid
+        feasible ⇔ D_need ≤ D_usable
+        ξ = max(0, D_need / (v_max * endurance) - (1 - soc_floor))
 
-    This is the OPTIMIZATION approach from my mathematical model that finds
-    the minimum required battery reserve (slack/headroom) for any given mission.
-    The optimizer tells you the *minimum* reserve needed to make the mission feasible,
-    so you can plan with risk-informed, not arbitrary, safety margins.
+    ξ is a *deficit*: it is 0 whenever the mission is feasible, and grows
+    above 0 by however much the mission overruns the usable battery budget
+    when infeasible.
 
     Args:
         d_ferry: Maximum ferry distance from depot to grid edge (meters)
@@ -62,7 +63,7 @@ def optimize_battery_reserve(
         soc_floor: Minimum allowed battery reserve (default 0.1 = 10%)
 
     Returns:
-        BatteryOptimizationResult with optimal reserve and feasibility analysis
+        BatteryOptimizationResult with deficit ξ and feasibility analysis
 
     Raises:
         ValueError: If parameters are invalid
@@ -81,31 +82,16 @@ def optimize_battery_reserve(
     if not 0.0 <= soc_floor <= 1.0:
         raise ValueError(f"soc_floor must be in [0, 1], got {soc_floor}")
 
-    # Total distance required
-    total_distance = 2 * d_ferry + l_grid
+    d_need = 2 * d_ferry + l_grid
     max_distance = v_max * endurance
-    usable_distance = max_distance * (1 - soc_floor)
+    d_usable = max_distance * (1 - soc_floor)
 
-    # Edge case: zero distance
-    if total_distance == 0:
-        return BatteryOptimizationResult(
-            xi_optimal=0.0,
-            is_feasible=True,
-            margin_seconds=endurance * (1 - soc_floor),
-            margin_distance=usable_distance,
-            utilization=0.0,
-        )
+    is_feasible = d_need <= d_usable
+    xi_optimal = max(0.0, d_need / max_distance - (1 - soc_floor))
+    utilization = d_need / d_usable if d_usable > 0 else 1.0
 
-    # Utilization: fraction of usable battery needed
-    utilization = total_distance / usable_distance if usable_distance > 0 else 1.0
-    xi_optimal = max(0.0, min(xi_max, 1.0 - utilization))
-
-    # Margin calculations
-    margin_distance = usable_distance - total_distance
+    margin_distance = d_usable - d_need
     margin_seconds = margin_distance / v_max if v_max > 0 else 0.0
-
-    # Feasibility: must not exceed usable battery and must meet minimum reserve
-    is_feasible = (total_distance <= usable_distance) and (xi_optimal >= soc_floor)
 
     return BatteryOptimizationResult(
         xi_optimal=xi_optimal,
@@ -256,42 +242,31 @@ def analyze_battery_margin(
     """
     Analyze battery margin for mission planning.
 
-    Compares required vs. target battery reserves and provides margin analysis.
+    Uses the same deficit-slack convention as `optimize_battery_reserve`:
+    ``required_xi`` is 0 when the mission fits the usable battery budget and
+    grows above 0 by the shortfall when it does not.
 
     Args:
         d_ferry: Ferry distance from depot to grid edge (meters).
         l_grid: Total grid patrol distance (meters).
         v_max: Cruise velocity of UAV (meters/second).
         endurance: Total battery endurance (seconds).
-        target_xi: Target battery reserve fraction (default 0.1 = 10%).
+        target_xi: Maximum tolerated deficit fraction (default 0.1 = 10%).
         soc_floor: Minimum allowed battery reserve (default 0.1 = 10%).
 
     Returns:
-        required_xi: The minimum reserve fraction required for the mission to be feasible.
+        required_xi: The battery deficit fraction (0 = feasible).
         margin_seconds: Time margin (in seconds) between usable battery and required mission duration.
-        is_safe: True if the mission is feasible with the given target reserve, False otherwise.
+        is_safe: True if the mission is feasible and its deficit is within target_xi.
     """
-    # Calculate total distance required for the mission (ferry out + patrol + ferry back)
-    total_distance = 2 * d_ferry + l_grid
-    # Maximum possible distance the UAV can travel on a full battery
+    d_need = 2 * d_ferry + l_grid
     max_distance = v_max * endurance
-    # Usable battery distance after accounting for minimum state-of-charge (SoC) floor
-    usable_distance = max_distance * (1 - soc_floor)
+    d_usable = max_distance * (1 - soc_floor)
 
-    # Compute the minimum reserve fraction required for feasibility
-    # required_xi = 1 - (total_distance / usable_distance)
-    if usable_distance > 0:
-        required_xi = max(0.0, min(1.0, 1.0 - (total_distance / usable_distance)))
-    else:
-        required_xi = 1.0  # If no usable battery, require full reserve
-
-    # Margin: how much usable battery remains after the mission (meters)
-    margin_distance = usable_distance - total_distance
-    # Convert margin to seconds (how much extra time is available at cruise speed)
+    required_xi = max(0.0, d_need / max_distance - (1 - soc_floor))
+    margin_distance = d_usable - d_need
     margin_seconds = margin_distance / v_max if v_max > 0 else 0.0
-
-    # Safety check: mission is safe if total distance is within usable battery and target_xi is above soc_floor
-    is_safe = (total_distance <= usable_distance) and (target_xi >= soc_floor)
+    is_safe = (d_need <= d_usable) and (required_xi <= target_xi)
 
     return required_xi, margin_seconds, is_safe
 
