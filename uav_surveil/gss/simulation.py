@@ -234,6 +234,7 @@ class GSSSimulation:
                     self.config.uav.cruise_speed,
                     (-500.0, 0.0),  # depot coordinates
                     furthest_first,
+                    buse_s=self.config.battery.usable_endurance,
                 )
             else:
                 self.routes, route_summary = route_fn(
