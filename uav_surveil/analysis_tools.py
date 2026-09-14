@@ -49,6 +49,34 @@ def calculate_route_distance(
     return total_distance
 
 
+def make_simulation_info(config, number: int) -> Dict[str, Any]:
+    """Build the {number, algorithm, timestamp, base_name} info dict used to
+    tag every CSV/plot output for a run.
+
+    `base_name` follows the sim_<number>_<algo>[_FAIL-...]_<timestamp>
+    naming scheme shared by visualize_simulation.py and tools/run_scenario.py.
+    """
+    route_algo = config.optimization.route_algorithm
+    failure_tag = ""
+    if getattr(config, "failure", None) and getattr(config.failure, "enabled", False):
+        trig = config.failure.trigger
+        if trig.kind == "time" and trig.uav_id and trig.t_s is not None:
+            failure_tag = f"_FAIL-time-u{trig.uav_id}-t{int(trig.t_s)}"
+        elif trig.kind == "position" and trig.uav_id is not None:
+            failure_tag = f"_FAIL-pos-u{trig.uav_id}"
+        elif trig.kind == "soc" and trig.uav_id and trig.soc_threshold is not None:
+            failure_tag = f"_FAIL-soc-u{trig.uav_id}-s{int(trig.soc_threshold*100)}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = f"sim_{number:03d}_{route_algo}{failure_tag}_{timestamp}"
+
+    return {
+        "number": number,
+        "algorithm": route_algo,
+        "timestamp": timestamp,
+        "base_name": base_name,
+    }
+
+
 def log_route_analysis(
     routes: List[Route],
     cells: Sequence[Cell],

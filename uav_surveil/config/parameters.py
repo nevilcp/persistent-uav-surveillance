@@ -288,6 +288,12 @@ class STLParameters(BaseModel):
         le=600.0,
         description="Maximum allowed revisit gap Θ (seconds)",
     )
+    snapshot_period_s: float = Field(
+        default=600.0,
+        ge=30.0,
+        le=1800.0,
+        description="Coverage-gap CSV snapshot cadence (seconds)",
+    )
 
     # C-3: Spare launch contract
     spare_launch_deadline: float = Field(

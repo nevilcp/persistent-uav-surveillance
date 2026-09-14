@@ -11,6 +11,7 @@ from uav_surveil.gss.simulation import GSSSimulation
 from uav_surveil.analysis_tools import (
     compare_algorithm_performance,
     log_cell_coverage_gaps,
+    make_simulation_info,
 )
 import numpy as np
 import time
@@ -44,31 +45,9 @@ os.makedirs("results", exist_ok=True)
 # ⚙️  MANUAL SIMULATION NUMBER - Change this for each run!
 SIMULATION_NUMBER = 27  # 🔄 INCREMENT THIS FOR EACH NEW SIMULATION
 
-# Use manual number instead of auto-detection for now
-next_num = SIMULATION_NUMBER
-
-route_algo = config.optimization.route_algorithm
-failure_tag = ""
-if getattr(config, "failure", None) and getattr(config.failure, "enabled", False):
-    trig = config.failure.trigger
-    if trig.kind == "time" and trig.uav_id and trig.t_s is not None:
-        failure_tag = f"_FAIL-time-u{trig.uav_id}-t{int(trig.t_s)}"
-    elif trig.kind == "position" and trig.uav_id is not None:
-        failure_tag = f"_FAIL-pos-u{trig.uav_id}"
-    elif trig.kind == "soc" and trig.uav_id and trig.soc_threshold is not None:
-        failure_tag = f"_FAIL-soc-u{trig.uav_id}-s{int(trig.soc_threshold*100)}"
-timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-# Create sequential filename and store globally for other tools to use
-filename_base = f"sim_{next_num:03d}_{route_algo}{failure_tag}_{timestamp}"
-
 # Store simulation info globally for analysis tools
-simulation_info = {
-    "number": next_num,
-    "algorithm": route_algo,
-    "timestamp": timestamp,
-    "base_name": filename_base,
-}
+simulation_info = make_simulation_info(config, SIMULATION_NUMBER)
+filename_base = simulation_info["base_name"]
 
 sim = GSSSimulation(config)
 # Pass simulation info for consistent file naming

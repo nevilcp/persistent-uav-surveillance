@@ -1254,6 +1254,14 @@ class GSSSimulation:
                 pass
 
         # When failure is enabled and we reached end, emit recovery metrics CSVs
+        self._export_failure_recovery_csvs()
+
+    def _export_failure_recovery_csvs(self) -> None:
+        """Write `_recovery_metrics.csv` / `_soc_timeseries.csv` once the run
+        has stopped. Callable directly (e.g. by headless runners using
+        `run()`, where the final `_log_csv_metrics()` call happens while
+        state is still RUNNING) as well as from `_log_csv_metrics()` itself.
+        """
         if (
             getattr(self.config.failure, "enabled", False)
             and self.state != SimulationState.RUNNING
