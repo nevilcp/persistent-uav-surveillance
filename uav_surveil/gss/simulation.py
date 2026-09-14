@@ -659,6 +659,28 @@ class GSSSimulation:
         # ETA-based spare pre-launch (SIMPLIFIED - just triggers earlier returns)
         self._check_eta_prelaunch(speed, depot)
 
+        # Re-check IDLE UAVs deferred at swap completion because the fleet
+        # was already at full active strength (launch_time == inf): the
+        # active count fluctuates tick to tick, so "not needed yet" must be
+        # re-evaluated, not decided once, or these UAVs (and their routes)
+        # are stranded forever.
+        active_now = sum(
+            1 for uav in self.uavs if uav.state in (UAVState.ON_MISSION, UAVState.RTB)
+        )
+        if active_now < self._n_launch_target:
+            for uav in self.uavs:
+                if (
+                    uav.state == UAVState.IDLE
+                    and uav.launch_time == float("inf")
+                    and uav.phase_offset is not None
+                ):
+                    uav.launch_time = self._next_phase_time(
+                        uav.phase_offset, self._t_cyc, self.metrics.current_time
+                    )
+                    active_now += 1
+                    if active_now >= self._n_launch_target:
+                        break
+
         for uav in self.uavs:
             # --------------------------------------------------------------
             # Handle battery swap countdown
@@ -1019,10 +1041,15 @@ class GSSSimulation:
     def _launch_spare_for(self, origin_uav: UAV):
         """Launch a spare to continue the route of a returning UAV."""
         # Only select rotation spares, exclude contingency spares (reserved for failures)
+        # IDLE UAVs are parked waiting for their own phase slot to come back
+        # around, but per the design ("state stays SPARE until then") they
+        # remain usable as a generic spare in the meantime; excluding them
+        # starves other routes' swaps once the small dedicated rotation
+        # pool is exhausted.
         available_spares = [
             uav
             for uav in self.uavs
-            if uav.state == UAVState.SPARE and not uav.is_contingency
+            if uav.state in (UAVState.SPARE, UAVState.IDLE) and not uav.is_contingency
         ]
 
         if not available_spares:
