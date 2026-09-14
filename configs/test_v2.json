@@ -47,7 +47,7 @@
   "simulation": {
     "time_step": 0.5,
     "gss_frequency": 1.0,
-    "monte_carlo_runs": 10,
+    "monte_carlo_runs": 100,
     "random_seed": 42,
     "failure_rate": 0.001,
     "weather_enabled": false,

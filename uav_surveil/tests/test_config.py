@@ -196,10 +196,6 @@ class TestScenarios:
         assert config.battery.total_endurance == 3600.0  # Extended battery
         assert config.stl.max_revisit_gap == 180.0  # Relaxed constraint
 
-    @pytest.mark.xfail(
-        reason="test_v2.json schema drifted; loader raises pydantic validation. "
-        "Canonical thesis runs use the other scenarios."
-    )
     def test_load_test_scenario(self):
         """Test loading test scenario."""
         config = load_scenario("test")
@@ -207,7 +203,7 @@ class TestScenarios:
         assert config.config_name == "test"
         assert config.mission.area_width == 100.0  # Small test area
         assert config.mission.mission_duration == 300.0  # Short mission
-        assert config.simulation.monte_carlo_runs == 10  # Fast testing
+        assert config.simulation.monte_carlo_runs == 100  # Minimum valid value
         assert config.simulation.real_time_factor == 10.0  # Accelerated
 
     def test_invalid_scenario(self):
