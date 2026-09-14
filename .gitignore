@@ -79,3 +79,5 @@ outputs/
 *.lp
 *.mps
 *.sol 
+# Thesis PDF (not distributed)
+*.pdf
