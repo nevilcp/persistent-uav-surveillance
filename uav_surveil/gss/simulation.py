@@ -1307,15 +1307,19 @@ class GSSSimulation:
                 # Parse our metrics CSV to compute recovery stats
                 src = f"results/{base}_metrics.csv"
                 if os.path.exists(src):
-                    times, coverages = [], []
+                    times, coverages, rolling = [], [], []
                     with open(src, "r") as f:
                         rdr = _csv.reader(f)
                         next(rdr, None)
                         for row in rdr:
-                            if len(row) >= 5:
+                            # Columns: time, active_uavs, spare_uavs,
+                            # swapping_uavs, contingency_spares, failed_uavs,
+                            # deployed_uavs, coverage_%, rolling_avg_%, ...
+                            if len(row) >= 9:
                                 try:
                                     times.append(float(row[0]))
-                                    coverages.append(float(row[4]))
+                                    coverages.append(float(row[7]))
+                                    rolling.append(float(row[8]))
                                 except ValueError:
                                     pass
                     t_fail = (
@@ -1327,13 +1331,17 @@ class GSSSimulation:
                     time_under_90 = 0.0
                     rec_time_90 = None
                     if t_fail is not None and times:
-                        # Compute from t_fail onward
-                        for t, c in zip(times, coverages):
+                        # Min/duration-under-threshold from the raw signal;
+                        # recovery time from the rolling average (matches
+                        # the "recovers to >=90% rolling coverage" gate --
+                        # the noisy raw series can read >=90% transiently
+                        # right at t_fail before the failure's effect shows).
+                        for t, c, r in zip(times, coverages, rolling):
                             if t >= t_fail:
                                 min_cov = c if min_cov is None else min(min_cov, c)
                                 if c < 90.0:
                                     time_under_90 += 1.0
-                                elif rec_time_90 is None:
+                                if r >= 90.0 and rec_time_90 is None:
                                     rec_time_90 = t - t_fail
                         if rec_time_90 is None and times:
                             rec_time_90 = times[-1] - t_fail
