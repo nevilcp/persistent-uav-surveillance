@@ -52,6 +52,60 @@ leading to the steady-state baseline and the single-UAV failure demo.
   `docs/architecture.md`; canonical baseline numbers in
   `docs/baseline_config.md`; headline results in `RESULTS.md`.
 
+## 10) Post-thesis alignment (Sep 2026)
+A cross-check of the thesis (Ch. 3, Table 4.1, App. B) against the codebase
+and `docs/` found real gaps, bugs, and doc drift accumulated since the
+thesis was written. Fixed in place (no legacy flags), one commit per
+work-package:
+
+- **WP1 — Stage 0 wiring**: corrected ξ to a deficit (0 when feasible,
+  >0 shortfall otherwise, per §3 above); wired the check into
+  `GSSSimulation.initialize()` after Stage 3A so an infeasible route
+  raises before the sim starts.
+- **WP2 — Stage 3A**: implemented the documented serpentine sweep +
+  furthest-first seeding + boundary-smoothing algorithm (§4.1), replacing
+  the prior greedy/KMNN-derived generator.
+- **WP3 — Phase preservation**: routes keep a fixed phase offset across
+  battery swaps (`UAV.phase_offset`); added `RTB`/`IDLE` states to
+  `UAVState` so on-mission-returning and post-swap-waiting are
+  distinguishable from `SPARE`.
+- **WP4 — Stage 5 bridging**: capped insertions at exactly `K` per tick
+  (was up to `2K`), insert at the best-scoring index within a bounded
+  horizon instead of the current waypoint slot, and enforce the
+  `max_detour_ratio` geometry guard.
+- **WP5 — UAV state model**: `RTB`/`IDLE` propagated through
+  `simulation.py`, `stage4_policy.py`, `stage5_failure.py`, and the
+  plotting scripts' colour maps.
+- **WP6 — Bugs and config hygiene**: fixed the ETA pre-launch range
+  (`battery.max_range` never existed — silently defaulted to 10,000 m),
+  read the depot from config instead of a hardcoded value, computed
+  `n_surge` from true peak swap-window overlap, wired
+  `spare_launch_deadline`/`max_detour_ratio`/`total_endurance`, moved
+  `prelaunch_margin` to `battery.*`, and removed six unused config keys.
+- **WP7 — Headless runner**: added `tools/run_scenario.py` for
+  CI/batch-friendly runs without the animation overhead, reusing the
+  same CSV export path as `examples/visualize_simulation.py`.
+
+Two further bugs surfaced only while re-running the baseline under the
+phase-preservation fix (WP3): a UAV parked `IDLE` with `launch_time = inf`
+could get permanently stranded, and `IDLE` UAVs were wrongly excluded from
+the spare-selection pool, starving rotation under load. Both fixed in
+`simulation.py`; see `RESULTS.md` for the full account.
+
+**Re-run mapping** (Phase 2 — new tags continue from 027, old tags/figures
+retired once the new ones were validated):
+
+| New tag | Replaces | Command |
+|---|---|---|
+| `sim_027` | `sim_020` | `--config baseline --sim-number 27` |
+| `sim_028` | `sim_024` | `--sim-number 28 --inventory 11` |
+| `sim_029` | `sim_025` | `--sim-number 29 --inventory 31` |
+| `sim_030` | `sim_026` | `--sim-number 30 --duration 9600` |
+| `sim_031` | `sim_023` | `--sim-number 31 --failure` (u03 @ 1800 s) |
+
+See `docs/thesis_errata.md` for the full thesis-passage-by-passage mapping
+and `RESULTS.md` for the regenerated headline numbers.
+
 ---
 
 ## Definitions

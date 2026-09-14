@@ -103,6 +103,11 @@ PY
 
 # Run the visualiser (produces MP4/CSV under results/)
 python examples/visualize_simulation.py
+
+# Headless batch run (same CSVs, no animation) — used to produce the
+# canonical results/ and figures/ artefacts
+python tools/run_scenario.py --config baseline --sim-number 27 \
+       [--inventory 11] [--duration 9600] [--failure] [--snapshot-period 600] [--quiet]
 ```
 
 ## Results
