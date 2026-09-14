@@ -53,6 +53,9 @@ class UAV:
     is_active: bool = False
     # Extended attributes ---------------------------------------------------
     state: UAVState = UAVState.SPARE  # Initial state; updated by scheduler
+    phase_offset: Optional[float] = (
+        None  # Route's initial departure phase; kept across swaps
+    )
     swap_timer: float = 0.0  # Remaining hot-swap time (s)
     last_update: Optional[float] = None
     is_contingency: bool = False  # True if this UAV is reserved for failure scenarios

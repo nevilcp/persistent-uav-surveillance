@@ -140,6 +140,9 @@ class GSSSimulation:
     _last_global_no_spare_warning_time: float = 0.0
     _failed_id: Optional[str] = None
     _contingency_id: Optional[str] = None
+    _t_cyc: float = (
+        0.0  # T_cyc = longest route loop time; used for phase-preserving relaunch
+    )
 
     # ---------------------------------------------------------
     # Constants / tunables (could move to config later)
@@ -171,6 +174,13 @@ class GSSSimulation:
         progress = getattr(uav, "_waypoint_idx", 0)
         min_cells = max(2, int(self._MIN_PROGRESS_FRAC * route_len))
         return progress >= min_cells
+
+    @staticmethod
+    def _next_phase_time(phase: float, t_cyc: float, now: float) -> float:
+        """Smallest time >= now congruent to `phase` modulo `t_cyc`."""
+        if t_cyc <= 0:
+            return now
+        return now + ((phase - now) % t_cyc)
 
     # -----------------------------------------------------------------
     # Modify low-battery branch in _update_uavs to respect min progress
@@ -284,6 +294,7 @@ class GSSSimulation:
             # Stage 3B: Schedule departures
             print("🟢 Stage 3B: Scheduling departures...")
             schedule_summary = schedule_from_config(self.config, self.routes)
+            self._t_cyc = schedule_summary.longest_loop_time
             print(f"   ✅ Max loop time: {schedule_summary.longest_loop_time:.1f}s")
             print(
                 f"   📊 n_surge: {schedule_summary.n_surge}, β_adapt: {schedule_summary.β_adapt:.3f}"
@@ -606,6 +617,7 @@ class GSSSimulation:
                 route_list=route_list,
                 launch_time=departure,
                 is_active=False,  # will be activated when launch_time reached
+                phase_offset=departure if i < len(self.routes) else None,
             )
             self.uavs.append(uav)
 
@@ -666,20 +678,24 @@ class GSSSimulation:
                             self._cell_claim_times.pop(cell_id, None)
                         delattr(uav, "_previous_route_cells")
 
+                    # Stay SPARE until its own phase slot comes back around
+                    # (a spare is already covering this route at the current
+                    # phase; relaunching immediately would double-cover it).
+                    uav.state = UAVState.SPARE
+                    uav.is_active = False
+                    uav._waypoint_idx = 0
+
                     active_now = sum(
                         1 for vv in self.uavs if vv.state == UAVState.ON_MISSION
                     )
                     if active_now < self._n_launch_target:
-                        # Relaunch immediately to restore patrol density
-                        uav.state = UAVState.ON_MISSION
-                        uav.is_active = True
-                        uav.launch_time = self.metrics.current_time
-                        uav._waypoint_idx = 0
-                        # waypoints list already exists
+                        if uav.phase_offset is not None:
+                            uav.launch_time = self._next_phase_time(
+                                uav.phase_offset, self._t_cyc, self.metrics.current_time
+                            )
+                        else:
+                            uav.launch_time = self.metrics.current_time
                     else:
-                        # Stay as spare
-                        uav.state = UAVState.SPARE
-                        uav.is_active = False
                         uav.launch_time = float("inf")
                 # No further movement while swapping
                 continue
@@ -1032,75 +1048,51 @@ class GSSSimulation:
 
         spare = available_spares[0]
 
-        # Get the base route for this UAV
+        # Get the base route for this UAV; the spare takes over the SAME
+        # Route (not a freshly built partial one) so it continues the
+        # parent's loop at the parent's own point, preserving phase.
         base_route = origin_uav.route_list[0]
-
-        # Calculate remaining cells based on origin UAV's ACTUAL progress
+        total_cells = len(base_route.cell_sequence)
         current_waypoint_idx = getattr(origin_uav, "_waypoint_idx", 0)
-        # Convert waypoint index back to cell index (waypoints include depot)
-        cells_completed = max(
-            0, current_waypoint_idx - 1
-        )  # -1 because first waypoint is depot
-        remaining_cells = (
-            base_route.cell_sequence[cells_completed:] or base_route.cell_sequence
-        )
 
-        # Filter out cells already claimed by another UAV
-        remaining_cells = [
-            cid for cid in remaining_cells if cid not in self._claimed_cells
+        # Keep the >=3-cell tail-extension rule (docs §4.3) by starting
+        # earlier within the SAME route rather than building a new one.
+        MIN_SPARE_ROUTE_CELLS = 3
+        start_idx = min(current_waypoint_idx, total_cells)
+        if total_cells - start_idx < MIN_SPARE_ROUTE_CELLS:
+            start_idx = max(0, total_cells - MIN_SPARE_ROUTE_CELLS)
+
+        # Claim bookkeeping is keyed on the cells ahead of the spare only.
+        ahead_cells = [
+            cid
+            for cid in base_route.cell_sequence[start_idx:]
+            if cid not in self._claimed_cells
         ]
 
-        # Require minimum route length for efficiency - extend tail if needed
-        MIN_SPARE_ROUTE_CELLS = 3
-        if len(remaining_cells) < MIN_SPARE_ROUTE_CELLS:
-            shortage = MIN_SPARE_ROUTE_CELLS - len(remaining_cells)
-            # Extend with start of the parent's route to prevent coverage gaps
-            extension = base_route.cell_sequence[:shortage]
-            remaining_cells.extend(extension)
-            print(
-                f"🔄 Tail-extended spare {spare.id}: {len(remaining_cells)} cells (added {shortage} from route start)"
-            )
-
-        if len(remaining_cells) < MIN_SPARE_ROUTE_CELLS:
-            print(
-                f"⚠️  Route still too short for spare {spare.id} ({len(remaining_cells)} cells < {MIN_SPARE_ROUTE_CELLS}); skipping launch"
-            )
-            return None
-
-        if not remaining_cells:
+        if not ahead_cells:
             print(f"⚠️  No unclaimed cells left for spare {spare.id}; skipping launch")
             return None
-        # Register claims
-        self._claimed_cells.update(remaining_cells)
-        self._cell_claim_times.update(
-            {cid: self.metrics.current_time for cid in remaining_cells}
-        )
 
-        # Assign route to spare
-        spare_route = Route(
-            id=f"{spare.id}_route",
-            cell_sequence=remaining_cells,
-            loop_time=base_route.loop_time,
-            departure_time=self.metrics.current_time,
+        self._claimed_cells.update(ahead_cells)
+        self._cell_claim_times.update(
+            {cid: self.metrics.current_time for cid in ahead_cells}
         )
 
         print(f"🚀 Launching spare {spare.id} for {origin_uav.id}")
         print(
-            f"   Origin progress: waypoint {current_waypoint_idx}, completed {cells_completed} cells"
+            f"   Origin progress: waypoint {current_waypoint_idx}/{total_cells}; "
+            f"spare resumes route {base_route.id} at index {start_idx}"
         )
-        print(
-            f"   Spare route: {len(remaining_cells)} cells starting with {remaining_cells[:3] if remaining_cells else 'none'}"
-        )
-        print(f"   Full route was: {len(base_route.cell_sequence)} cells")
 
-        spare.route_list = [spare_route]
-        spare._waypoints = spare_route.get_waypoints(self.cell_lookup)
-        spare._waypoint_idx = 0
+        spare.route_list = [base_route]
+        spare._waypoints = base_route.get_waypoints(self.cell_lookup)
+        spare._waypoint_idx = start_idx
         spare.state = UAVState.ON_MISSION
         spare.mission_start_time = self.metrics.current_time
+        spare.phase_offset = origin_uav.phase_offset
 
-        # Track cells assigned to this UAV for later cleanup
-        spare._previous_route_cells = remaining_cells.copy()
+        # Track cells claimed for this launch, for later claim cleanup.
+        spare._previous_route_cells = ahead_cells.copy()
 
         # Mark C3 alarm as satisfied if we launched within deadline
         for alarm in self.c3_alarms:
