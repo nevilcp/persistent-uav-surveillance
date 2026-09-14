@@ -118,12 +118,26 @@ class BridgeManager:
 
         speed = self.sim.config.uav.cruise_speed
         usable_range = speed * self.sim.config.battery.usable_endurance
+        soc_margin = cfg.prelaunch_margin
+        soc_threshold = self.sim.config.battery.soc_return_threshold
 
-        # Limit urgent cells processed per tick to reduce complexity
-        for cell in urgent[: self.sim.config.failure.bridge_policy.realloc_k * 2]:
+        # Bound the detour-insertion search horizon (candidate indices ahead
+        # of each UAV's current waypoint) to keep the per-tick cost bounded.
+        DETOUR_HORIZON = 8
+
+        from math import hypot
+
+        # Process the full urgent list but stop once K cells have actually
+        # been inserted this tick (cells with no feasible candidate are
+        # skipped without consuming the cap).
+        inserted = 0
+        for cell in urgent:
+            if inserted >= cfg.realloc_k:
+                break
             if cell.id in self._assigned_cells.get(failed_id, set()):
                 continue
-            candidates = []
+
+            best = None  # (delta_t, uav, insert_index)
             for u in active:
                 # Cap per UAV
                 if u.temp_assignments.get(failed_id, 0) >= cfg.max_inserts_per_uav:
@@ -131,43 +145,50 @@ class BridgeManager:
                 # Hold time hysteresis
                 if now - getattr(u, "last_insert_time", 0.0) < cfg.min_hold_time_s:
                     continue
-                # Determine current and next waypoint
                 if not hasattr(u, "_waypoints") or not hasattr(u, "_waypoint_idx"):
                     continue
                 wp_idx = u._waypoint_idx
                 waypoints = u._waypoints
                 if wp_idx >= len(waypoints):
                     continue
-                curr_xy = (u.x, u.y)
-                next_xy = waypoints[wp_idx]
-                # Δdistance for one-off insertion at current slot
-                from math import hypot
 
-                d_curr_next = hypot(curr_xy[0] - next_xy[0], curr_xy[1] - next_xy[1])
-                d_curr_cell = hypot(curr_xy[0] - cell.x, curr_xy[1] - cell.y)
-                d_cell_next = hypot(cell.x - next_xy[0], cell.y - next_xy[1])
-                d_extra = max(0.0, d_curr_cell + d_cell_next - d_curr_next)
-                eta = d_curr_cell / speed if speed > 0 else float("inf")
+                route = u.route_list[0] if u.route_list else None
+                l_u = route.loop_time if route and route.loop_time else None
+                j_max = min(wp_idx + DETOUR_HORIZON, len(waypoints))
 
-                # SoC feasibility: margin + added distance budget
-                soc_margin = self.sim.config.failure.bridge_policy.prelaunch_margin
-                if usable_range <= 0:
-                    continue
-                added_soc = d_extra / usable_range
-                soc_threshold = self.sim.config.battery.soc_return_threshold
-                if u.soc < soc_threshold + soc_margin + added_soc:
-                    continue
+                for j in range(wp_idx, j_max):
+                    prev_xy = (u.x, u.y) if j == wp_idx else waypoints[j - 1]
+                    next_xy = waypoints[j]
+                    d_prev_next = hypot(
+                        prev_xy[0] - next_xy[0], prev_xy[1] - next_xy[1]
+                    )
+                    d_prev_cell = hypot(prev_xy[0] - cell.x, prev_xy[1] - cell.y)
+                    d_cell_next = hypot(cell.x - next_xy[0], cell.y - next_xy[1])
+                    d_extra = max(0.0, d_prev_cell + d_cell_next - d_prev_next)
+                    delta_t = d_extra / speed if speed > 0 else float("inf")
 
-                score = d_extra + eta
-                candidates.append((score, u, wp_idx, d_extra))
+                    # Geometry guard: detour time bounded by a fraction of
+                    # the UAV's own loop time.
+                    if l_u and delta_t > cfg.max_detour_ratio * l_u:
+                        continue
 
-            if not candidates:
+                    # SoC feasibility: margin + added distance budget
+                    if usable_range <= 0:
+                        continue
+                    added_soc = d_extra / usable_range
+                    if u.soc < soc_threshold + soc_margin + added_soc:
+                        continue
+
+                    if best is None or delta_t < best[0]:
+                        best = (delta_t, u, j)
+
+            if best is None:
                 continue
-            candidates.sort(key=lambda t: (t[0], t[1].id))
-            _, u_best, idx_best, d_extra = candidates[0]
+            _, u_best, idx_best = best
 
-            # Insert detour waypoint at current index
+            # Insert detour waypoint at the best index found
             u_best._waypoints.insert(idx_best, (cell.x, cell.y))
+            inserted += 1
             # Track as temporary assignment
             u_best.temp_assignments[failed_id] = (
                 u_best.temp_assignments.get(failed_id, 0) + 1
