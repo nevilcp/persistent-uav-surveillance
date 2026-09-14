@@ -10,9 +10,9 @@ matplotlib.use("Agg")  # Use non-GUI backend for headless environments
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Visual configuration
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 from matplotlib import animation, cm
 
 from uav_surveil.analysis_tools import (

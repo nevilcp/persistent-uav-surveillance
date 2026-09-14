@@ -5,13 +5,12 @@ into a grid of cells for coverage optimization.
 """
 
 
-# New import for convenient config integration
 from .config.parameters import SystemParameters
 from .core.cell import Cell
 
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Public helper – build grid directly from a SystemParameters
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 def build_grid_from_config(config: "SystemParameters") -> list[Cell]:
@@ -34,7 +33,7 @@ def build_grid_from_config(config: "SystemParameters") -> list[Cell]:
     )
 
 
-# Re-export for easy wildcard import (flake8: disable=F401)
+# Re-export for wildcard import
 __all__ = [
     "build_grid_from_config",
     "build_surveillance_grid",

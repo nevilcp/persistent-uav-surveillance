@@ -40,11 +40,11 @@ def _merge_small_routes(route_list: list[Route], n_launch: int) -> list[Route]:
         if len(r.cell_sequence) < MIN_CELLS_PER_ROUTE:
             orphan_cells.extend(r.cell_sequence)
             routes.remove(r)
-    # attach orphans round-robin to shortest routes
+    # Attach orphans round-robin to shortest routes
     routes.sort(key=lambda rt: len(rt.cell_sequence))
     for idx, cid in enumerate(orphan_cells):
         routes[idx % len(routes)].cell_sequence.append(cid)
-    # if still fewer than n_launch, create empty placeholders
+    # If still fewer than n_launch, create empty placeholders
     while len(routes) < n_launch:
         routes.append(
             Route(id=f"alns_empty_{len(routes)}", cell_sequence=[], loop_time=0.0)
@@ -71,7 +71,7 @@ def generate_routes_alns(
     start_time = time.time()
 
     try:
-        # Create initial solution using Round-Robin as starting point (better balance than KMNN)
+        # Round-Robin start point gives better balance than KMNN
         from .stage3_route_roundrobin import generate_routes_roundrobin
 
         initial_routes, _ = generate_routes_roundrobin(
@@ -111,7 +111,7 @@ def generate_routes_alns(
         # Set up ALNS components with correct parameters
         # RouletteWheel expects (weights, decay, num_destroy, num_repair)
         select = RouletteWheel([25, 5, 1, 0], 0.8, 1, 1)  # 1 destroy, 1 repair operator
-        # Use Simulated Annealing for better exploration (start temp = 10% of initial objective)
+        # Simulated Annealing for exploration (start temp = 10% of initial objective)
         initial_obj = initial_state.objective()
         start_temp = max(0.1 * initial_obj, 10.0)  # Minimum temperature of 10
         accept = SimulatedAnnealing(

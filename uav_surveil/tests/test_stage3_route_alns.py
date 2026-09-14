@@ -32,7 +32,7 @@ def test_alns_loop_time_under_threshold():
     assert len(routes) > 0
     assert len(routes) <= n_launch
 
-    # Check loop time constraint (280s = 2.33 × 120s revisit requirement - realistic target)
+    # Loop time constraint: 280s = 2.33 x 120s revisit requirement
     max_loop_time = max(route.loop_time for route in routes if route.loop_time > 0)
     assert (
         max_loop_time < 280.0

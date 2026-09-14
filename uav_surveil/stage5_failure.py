@@ -222,9 +222,9 @@ class BridgeManager:
             if self._eta_contingency(failed_id) <= cfg.realloc_horizon_s:
                 break
 
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Orphan tracking util methods
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     def _get_orphan_cells(self, failed_id: str) -> list[Cell]:
         # Build orphan list as the failed UAV's remaining loop from failure tail index
         failed = next((u for u in self.sim.uavs if u.id == failed_id), None)
@@ -298,7 +298,7 @@ class FailureManager:
             self.trigger.fired_once = True
         # Bridge tick and possible handover progression
         self.bridge.tick()
-        # Handover check: if contingency ETA within grace, freeze bridge and revert neighbors
+        # Handover once contingency ETA is within grace: freeze bridge, revert neighbors
         if self.bridge.enabled and self.bridge.failed_id:
             eta = self.bridge._eta_contingency(self.bridge.failed_id)
             if eta <= self.sim.config.failure.bridge_policy.handover_grace_s:
@@ -308,14 +308,14 @@ class FailureManager:
                 # After handover: disable per-step bridge work to avoid overhead
                 self.enabled = False
 
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     def _handle_failure(self) -> None:
         failed_uav = self._get_uav(self.trigger.uav_id if self.trigger else None)
         if failed_uav is None:
             return
-        # mark failure time
+        # Mark failure time
         self.sim._failure_markers["t_fail"] = self.sim.metrics.current_time
         # Export failure meta and failed-route cell list for exact orphan analysis
         try:
@@ -349,7 +349,7 @@ class FailureManager:
         if not hasattr(failed_uav, "_waypoint_idx"):
             failed_uav._waypoint_idx = 0
         failed_uav.tail_index_at_failure = int(failed_uav._waypoint_idx)
-        # Orphan remaining segment: we simply note the remaining cells from route_list[0]
+        # Orphan segment is just the remaining cells from route_list[0]
         orphan_cells: list[str] = []
         if failed_uav.route_list:
             seq = failed_uav.route_list[0].cell_sequence

@@ -30,9 +30,9 @@ class RouteSetSummary:
     longest_loop_time: float
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 def _serpentine_order(cells: Sequence[Cell]) -> list[Cell]:
@@ -72,9 +72,9 @@ def _chunk(lst: list[Cell], k: int) -> list[list[Cell]]:
     return chunks
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 def generate_routes_greedy(
@@ -112,11 +112,11 @@ def generate_routes_greedy(
         route_id = f"route_{idx:02d}"
         cell_ids = [c.id for c in chunk]
 
-        # naïve path length estimate: Manhattan distance along chunk
+        # Naive path length estimate: Manhattan distance along chunk
         distance = max(0, (len(chunk) - 1)) * cell_size_est
         duration = distance / cruise_speed if cruise_speed > 0 else 0.0
 
-        # loop time includes ferry to first cell & back to depot (approx)
+        # Loop time includes ferry to first cell & back to depot (approx)
         loop_time = (
             duration
             + 2

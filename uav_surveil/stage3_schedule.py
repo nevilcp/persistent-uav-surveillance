@@ -25,9 +25,9 @@ class ScheduleSummary:
     β_adapt: float  # Adaptive spare floor suggestion
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Public function
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 def pack_departures_staggered(
@@ -68,7 +68,7 @@ def pack_departures_staggered(
         within_batch_gap = 5.0  # small gap within batch for pad clearance
         route.departure_time = batch_start_time + within_batch_idx * within_batch_gap
 
-    # Debug: Print departure schedule
+    # Print departure schedule
     print(
         f"   📅 Batch Schedule (batch_size={batch_size}, batch_period={batch_period}s):"
     )

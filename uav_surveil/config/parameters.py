@@ -178,7 +178,7 @@ class OptimizationParameters(BaseModel):
     alns_iterations: int = Field(
         default=1000, ge=100, le=10000, description="ALNS algorithm iteration limit"
     )
-    # New: choose route algorithm (factory name)
+    # Route algorithm to use (factory name)
     route_algorithm: str = Field(
         default="greedy",
         description="Route generation algorithm: greedy, kmnn, rr, alns, milp",

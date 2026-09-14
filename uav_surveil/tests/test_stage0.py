@@ -15,8 +15,8 @@ class TestBatteryOptimization:
     """Test battery reserve optimization (mathematical model implementation)."""
 
     def test_optimal_reserve_basic(self):
-        """Test basic optimization with your baseline parameters."""
-        # Your baseline: 500m ferry, 1000m grid, 4m/s, 2100s endurance
+        """Test basic optimization with the baseline parameters."""
+        # Baseline: 500m ferry, 1000m grid, 4m/s, 2100s endurance
         result = optimize_battery_reserve(
             d_ferry=500.0,
             l_grid=1000.0,

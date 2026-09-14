@@ -27,7 +27,7 @@ def get_baseline_config() -> SystemParameters:
         config_name="baseline",
         description="Baseline configuration from thesis reference document",
         version="1.0",
-        # Uses all default values which match your specifications
+        # Uses all default values, which match the thesis reference document
     )
 
 

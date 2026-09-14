@@ -126,7 +126,7 @@ class GSSSimulation:
     # Internal tracking
     _start_time: float | None = None
     _last_update: float = 0.0
-    cell_lookup: dict[str, Cell] = field(default_factory=dict)  # Added for cell lookup
+    cell_lookup: dict[str, Cell] = field(default_factory=dict)
     _failure_manager: FailureManager | None = None
     _failure_markers: dict[str, Any] = field(default_factory=dict)
     _soc_log_enabled: bool = False
@@ -135,22 +135,17 @@ class GSSSimulation:
     _last_global_no_spare_warning_time: float = 0.0
     _failed_id: str | None = None
     _contingency_id: str | None = None
-    _t_cyc: float = (
-        0.0  # T_cyc = longest route loop time; used for phase-preserving relaunch
-    )
+    # T_cyc = longest route loop time; used for phase-preserving relaunch
+    _t_cyc: float = 0.0
 
-    # ---------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Constants / tunables (could move to config later)
-    # ---------------------------------------------------------
-    _MIN_PROGRESS_FRAC = (
-        0.10  # parent must finish 10% of its route before a spare can take over
-    )
+    # -------------------------------------------------------------------------
+    # Parent must finish this fraction of its route before a spare can take over
+    _MIN_PROGRESS_FRAC = 0.10
 
-    # ---------------------------------------------------------
-    # During __post_init__ create registry for claimed cells
-    # ---------------------------------------------------------
     def __post_init__(self):
-        # dataclass post-init hook: initialise claimed cell registry
+        # Dataclass post-init hook: initialise claimed cell registry
         self._claimed_cells = set()
         # Track when cells were claimed to allow expiration
         self._cell_claim_times = {}  # cell_id -> claim_timestamp
@@ -158,7 +153,6 @@ class GSSSimulation:
         self._csv_file = None
         self._csv_writer = None
 
-    # Helper --------------------------------------------------
     def _enough_progress(self, uav: UAV) -> bool:
         """Return True if the UAV has flown enough of its route to justify a spare."""
         if not uav.route_list:
@@ -176,11 +170,6 @@ class GSSSimulation:
         if t_cyc <= 0:
             return now
         return now + ((phase - now) % t_cyc)
-
-    # -----------------------------------------------------------------
-    # Modify low-battery branch in _update_uavs to respect min progress
-    # -----------------------------------------------------------------
-    # (below we add an early-return if not enough progress)
 
     def initialize(self) -> bool:
         """
@@ -202,7 +191,7 @@ class GSSSimulation:
             # Stage 2: Optimize fleet size (initial pass with default β)
             print("🟢 Stage 2: Optimizing fleet size (initial)...")
 
-            # 🆕 ENHANCEMENT: Use enhanced fleet sizing with rotation/contingency distinction
+            # Enhanced fleet sizing distinguishes rotation from contingency spares
             use_enhanced = getattr(
                 self.config.optimization, "use_enhanced_fleet", False
             )
@@ -371,7 +360,7 @@ class GSSSimulation:
             except Exception:  # noqa: BLE001 - best-effort lookup, fall back to no orphan route
                 self._failed_route_ids = []
 
-            # Debug: Log initial route assignments
+            # Log initial route assignments
             print("📋 Initial route assignments:")
             for i, uav in enumerate(self.uavs):
                 if uav.route_list and i < len(self.routes):
@@ -410,7 +399,6 @@ class GSSSimulation:
             except Exception as _e:  # noqa: BLE001 - optional export, must not abort init
                 print(f"⚠️  Route membership export failed: {_e}")
 
-            # 🔍 ANALYSIS: Route analysis after generation
             # Determine actual algorithm used (check route IDs)
             actual_algorithm = "unknown"
             if self.routes and self.routes[0].id:
@@ -506,7 +494,7 @@ class GSSSimulation:
                             self._soc_log[u.id] = []
                         self._soc_log[u.id].append((t_now, u.soc))
 
-            # 🔍 ANALYSIS: Coverage gap snapshots at configurable cadence
+            # Coverage gap snapshots at configurable cadence
             snapshot_period = 600.0
             try:
                 if getattr(self.config.failure, "enabled", False):
@@ -643,7 +631,7 @@ class GSSSimulation:
 
     def _update_uavs(self) -> None:
         """Update UAV positions, handle swapping, and manage spare launches."""
-        # NEW – Stage-4 policy decisions (battery return rule, spare checks)
+        # Stage-4 policy decisions (battery return rule, spare checks)
         apply_policy(self.uavs, self.metrics.current_time, self.config)
 
         speed = self.config.uav.cruise_speed  # UAV speed (m/s)
@@ -651,7 +639,7 @@ class GSSSimulation:
         depot = (self.config.mission.depot_x, self.config.mission.depot_y)
         soc_threshold = self.config.battery.soc_return_threshold
 
-        # ETA-based spare pre-launch (SIMPLIFIED - just triggers earlier returns)
+        # ETA-based spare pre-launch: just triggers earlier returns
         self._check_eta_prelaunch(speed, depot)
 
         # Re-check IDLE UAVs deferred at swap completion because the fleet
@@ -677,9 +665,9 @@ class GSSSimulation:
                         break
 
         for uav in self.uavs:
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             # Handle battery swap countdown
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             if uav.state == UAVState.FAILED:
                 # Failed UAV does not move; keep position fixed and skip logic
                 continue
@@ -721,9 +709,9 @@ class GSSSimulation:
                 # No further movement while swapping
                 continue
 
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             # RTB: on mission, navigating straight back to depot
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             if uav.state == UAVState.RTB:
                 dist = uav.move_towards(depot[0], depot[1], speed, dt)
                 self._consume_battery(uav, dist)
@@ -740,9 +728,9 @@ class GSSSimulation:
                     uav._waypoint_idx = 0
                 continue
 
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             # Scheduled launch / activation
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             if (
                 uav.state in (UAVState.SPARE, UAVState.IDLE)
                 and not uav.is_active
@@ -756,9 +744,9 @@ class GSSSimulation:
             if uav.state != UAVState.ON_MISSION:
                 continue
 
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             # Normal waypoint following logic
-            # --------------------------------------------------------------
+            # -----------------------------------------------------------------
             if uav.route_list:
                 if not hasattr(uav, "_waypoints"):
                     route = uav.route_list[0]
@@ -809,7 +797,7 @@ class GSSSimulation:
                 if uav.at_position(target[0], target[1]):
                     uav._waypoint_idx += 1
 
-        # After all movement, second-pass check: any UAV dropped below threshold mid-route
+        # Second-pass check: any UAV dropped below threshold mid-route
         soc_threshold = self.config.battery.soc_return_threshold
         for uav in self.uavs:
             if uav.state == UAVState.ON_MISSION and uav.soc <= soc_threshold:
@@ -830,20 +818,19 @@ class GSSSimulation:
         # Evaluate outstanding alarms
         deadline = self.config.stl.spare_launch_deadline
         for uav in self.uavs:
-            # considered satisfied if a spare launched within the deadline
+            # An alarm is satisfied once a spare launches within the deadline
             if (
                 getattr(uav, "_alarm_raised", False)
                 and self.metrics.current_time - uav._alarm_time > deadline
-                # find any spare launched corresponding? If not already marked missed
                 and not getattr(uav, "_alarm_checked", False)
             ):
                 self.metrics.c3_missed += 1
                 uav._alarm_checked = True
                 uav._alarm_raised = False
 
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Battery helper
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
 
     def _usable_range_m(self) -> float:
         """Usable flight range (m) = cruise_speed * usable_endurance."""
@@ -864,8 +851,8 @@ class GSSSimulation:
     def _update_cells(self) -> None:
         """Update cell coverage status and ages."""
         current_time = self.metrics.current_time
-        # Sensor range: UAV can observe cells within this distance
-        # Set to cell_size/2 + margin to ensure adjacent cells are covered during diagonal flight
+        # Sensor range: UAV can observe cells within this distance. Set to
+        # cell_size/2 + margin so adjacent cells stay covered during diagonal flight
         sensor_range = self.config.grid.cell_size * 0.75  # 30m for 40m cells
 
         # Expire old cell claims as safety fallback (most claims cleared on observation)
@@ -891,7 +878,7 @@ class GSSSimulation:
                     if distance <= sensor_range:
                         cell.update_observation(current_time)
                         cell.is_covered = True
-                        # Clear claim when cell is actually observed (instead of fixed timeout)
+                        # Clear claim on actual observation, not just timeout
                         if cell.id in self._claimed_cells:
                             self._claimed_cells.discard(cell.id)
                             self._cell_claim_times.pop(cell.id, None)
@@ -1028,18 +1015,18 @@ class GSSSimulation:
                 return uav
         return None
 
-    # -----------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Helper: launch spare with remaining segment of route
-    # -----------------------------------------------------------------
+    # -------------------------------------------------------------------------
 
     def _launch_spare_for(self, origin_uav: UAV):
         """Launch a spare to continue the route of a returning UAV."""
-        # Only select rotation spares, exclude contingency spares (reserved for failures)
-        # IDLE UAVs are parked waiting for their own phase slot to come back
-        # around, but per the design ("state stays SPARE until then") they
-        # remain usable as a generic spare in the meantime; excluding them
-        # starves other routes' swaps once the small dedicated rotation
-        # pool is exhausted.
+        # Only rotation spares are eligible; contingency spares stay reserved
+        # for failures. IDLE UAVs are parked waiting for their own phase
+        # slot to come back around, but per the design ("state stays SPARE
+        # until then") they remain usable as a generic spare in the
+        # meantime; excluding them starves other routes' swaps once the
+        # small dedicated rotation pool is exhausted.
         available_spares = [
             uav
             for uav in self.uavs
@@ -1047,7 +1034,7 @@ class GSSSimulation:
         ]
 
         if not available_spares:
-            # Reduce verbose logging – global throttle to 60s when quiet mode is active
+            # Global throttle to 60s when quiet mode is active, to reduce log spam
             current_time = self.metrics.current_time
             if (
                 not self._quiet_logging
@@ -1136,7 +1123,6 @@ class GSSSimulation:
 
         return spare
 
-    # ETA pre-launch method - will be reimplemented in Week 1
     def _check_eta_prelaunch(self, speed: float, depot: tuple[float, float]) -> None:
         """
         Enhanced ETA pre-launch: Launch spares when the parent will hit θ_return
@@ -1203,7 +1189,7 @@ class GSSSimulation:
                 info = self._simulation_info
                 filename = f"results/{info['base_name']}_metrics.csv"
             else:
-                # Fallback to old behavior
+                # No simulation info: derive a timestamped name
                 timestamp = datetime.datetime.now().strftime(  # noqa: DTZ005
                     "%Y%m%d_%H%M%S"
                 )
@@ -1214,7 +1200,7 @@ class GSSSimulation:
             self._csv_file = open(filename, "w", newline="")  # noqa: SIM115 - kept open for the simulation's lifetime
             self._csv_writer = csv.writer(self._csv_file)
 
-            # Write header (includes new fleet and orphan telemetry fields)
+            # Write header (includes fleet and orphan telemetry fields)
             self._csv_writer.writerow(
                 [
                     "time",
@@ -1295,9 +1281,8 @@ class GSSSimulation:
                 import os
 
                 metrics_path = f"results/{base}_recovery_metrics.csv"
-                # Attempt to compute from existing rolling window/history
-                # Note: we have only current rolling window in memory; rely on metrics CSV for full series
-                # Parse our metrics CSV to compute recovery stats
+                # Only the current rolling window is in memory, so parse the
+                # metrics CSV to compute recovery stats over the full series
                 src = f"results/{base}_metrics.csv"
                 if os.path.exists(src):
                     times, coverages, rolling = [], [], []

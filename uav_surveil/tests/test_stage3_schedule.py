@@ -14,6 +14,6 @@ def test_schedule_spacing():
 
     # Ensure β_adapt is in (0,1)
     assert 0 < summary.β_adapt < 1
-    # departure times strictly increasing
+    # Departure times strictly increasing
     departures = [r.departure_time for r in routes]
     assert departures == sorted(departures)

@@ -32,9 +32,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# -----------------------------
+# -----------------------------------------------------------------------------
 # Utilities
-# -----------------------------
+# -----------------------------------------------------------------------------
 
 
 def _ensure_dir(path: str) -> None:
@@ -78,7 +78,7 @@ def read_metrics_csv(path: str) -> dict[str, np.ndarray]:
                 try:
                     cols[key].append(float(v))
                 except (ValueError, TypeError):
-                    # treat empty/malformed as nan
+                    # Treat empty/malformed as nan
                     cols[key].append(float("nan"))
     return {k: np.asarray(v, dtype=float) for k, v in cols.items()}
 
@@ -157,9 +157,9 @@ def read_coverage_snapshot(path: str) -> dict[str, np.ndarray]:
     }
 
 
-# -----------------------------
+# -----------------------------------------------------------------------------
 # Plotting
-# -----------------------------
+# -----------------------------------------------------------------------------
 
 
 def plot_coverage_time(
@@ -411,7 +411,7 @@ def summarize_metrics(metrics: dict[str, np.ndarray]) -> dict[str, float]:
         return {"avg": float("nan"), "peak": float("nan"), "time_ge_90": float("nan")}
     avg = float(np.nanmean(cov))
     peak = float(np.nanmax(cov))
-    # approximate seconds above 90
+    # Approximate seconds above 90
     dt = np.diff(t, prepend=t[0])
     dt[0] = max(dt[0], 1.0)
     time_ge_90 = float(np.nansum(dt[cov >= 90.0]))
@@ -1049,7 +1049,7 @@ def plot_soc_series(
     # Choose a small subset if many columns
     keys = list(series.keys())
     if highlight:
-        # place highlight first
+        # Place highlight first
         keys = list(dict.fromkeys(list(highlight) + keys))
     keys = keys[:6]
     for uid in keys:
@@ -1101,7 +1101,6 @@ def plot_revisit_hist(
     plt.close()
 
 
-# New: percentile evolution across snapshots
 def plot_revisit_percentiles(
     snapshot_paths: Sequence[str],
     out_png: str,
@@ -1147,9 +1146,9 @@ def plot_revisit_percentiles(
     plt.close()
 
 
-# -----------------------------
+# -----------------------------------------------------------------------------
 # Orchestration
-# -----------------------------
+# -----------------------------------------------------------------------------
 
 
 @dataclass

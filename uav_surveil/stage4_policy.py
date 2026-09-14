@@ -88,9 +88,9 @@ def apply_policy(
         config:    Loaded *SystemParameters* containing thresholds.
     """
 
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # 1) Enhanced battery return rule – distance-aware SoC threshold
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     base_threshold = config.battery.soc_return_threshold
     depot_x = getattr(config.mission, "depot_x", -500.0)
     depot_y = getattr(config.mission, "depot_y", 0.0)
@@ -115,9 +115,9 @@ def apply_policy(
                 # on this state and navigate home.
                 uav.state = UAVState.RTB
 
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # 2) Spare-floor rule – ensure at least one spare on pad (baseline)
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Count spare UAVs ready on pad (launch_time == inf) – launch decisions
     # are still handled inside *gss.simulation* so we only detect for now.
     spare_ready = sum(

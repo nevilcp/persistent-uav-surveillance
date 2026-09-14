@@ -90,7 +90,7 @@ def plot_manual_contingency(base_tag: str, t_fail: float, out_png: str) -> None:
         step="post",
     )
 
-    # Deployed overlay (active + swapping) – dotted to avoid confusion with failure marker
+    # Deployed overlay (active + swapping); dotted to avoid clashing with failure marker
     ax.plot(
         t,
         act + swp,
@@ -103,7 +103,7 @@ def plot_manual_contingency(base_tag: str, t_fail: float, out_png: str) -> None:
     # Failure annotation
     tf = float(t_fail)
     ax.axvline(tf, color="#6a1b9a", ls="--", lw=1.2)
-    # Horizontal failure label near the bottom, offset below tick labels to avoid overlap
+    # Horizontal failure label near the bottom, offset below tick labels
     ax.annotate(
         f"Failure (t={int(tf)} s)",
         xy=(tf, ax.get_ylim()[0]),
