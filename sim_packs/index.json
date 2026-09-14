@@ -1,32 +1,27 @@
 {
-  "sim_020_roundrobin": {
-    "label": "Steady-state baseline (N=21, 4800 s)",
-    "zip": "sim_packs/sim_020_roundrobin_20250813_021413_pack.zip",
-    "base": "results/sim_020_roundrobin_20250813_021413",
-    "metrics": "results/sim_020_roundrobin_20250813_021413_metrics.csv"
+  "sim_027_roundrobin_": {
+    "zip": "sim_packs/sim_027_roundrobin_20260914_190727_pack.zip",
+    "base": "results/sim_027_roundrobin_20260914_190727",
+    "metrics": "results/sim_027_roundrobin_20260914_190727_metrics.csv"
   },
-  "sim_023_roundrobin": {
-    "label": "Single-UAV failure at t=1800 s",
-    "zip": "sim_packs/sim_023_roundrobin_FAIL-time-u03-t1800_20250814_055850_pack.zip",
-    "base": "results/sim_023_roundrobin_FAIL-time-u03-t1800_20250814_055850",
-    "metrics": "results/sim_023_roundrobin_FAIL-time-u03-t1800_20250814_055850_metrics.csv"
+  "sim_028_roundrobin_": {
+    "zip": "sim_packs/sim_028_roundrobin_20260914_190729_pack.zip",
+    "base": "results/sim_028_roundrobin_20260914_190729",
+    "metrics": "results/sim_028_roundrobin_20260914_190729_metrics.csv"
   },
-  "sim_024_roundrobin": {
-    "label": "Under-provisioned (N=11)",
-    "zip": "sim_packs/sim_024_roundrobin_20250815_021514_pack.zip",
-    "base": "results/sim_024_roundrobin_20250815_021514",
-    "metrics": "results/sim_024_roundrobin_20250815_021514_metrics.csv"
+  "sim_029_roundrobin_": {
+    "zip": "sim_packs/sim_029_roundrobin_20260914_190731_pack.zip",
+    "base": "results/sim_029_roundrobin_20260914_190731",
+    "metrics": "results/sim_029_roundrobin_20260914_190731_metrics.csv"
   },
-  "sim_025_roundrobin": {
-    "label": "Over-provisioned (N=31)",
-    "zip": "sim_packs/sim_025_roundrobin_20250815_032408_pack.zip",
-    "base": "results/sim_025_roundrobin_20250815_032408",
-    "metrics": "results/sim_025_roundrobin_20250815_032408_metrics.csv"
+  "sim_030_roundrobin_": {
+    "zip": "sim_packs/sim_030_roundrobin_20260914_190734_pack.zip",
+    "base": "results/sim_030_roundrobin_20260914_190734",
+    "metrics": "results/sim_030_roundrobin_20260914_190734_metrics.csv"
   },
-  "sim_026_roundrobin": {
-    "label": "Long-run stability (N=21, 9600 s)",
-    "zip": "sim_packs/sim_026_roundrobin_20250815_040728_pack.zip",
-    "base": "results/sim_026_roundrobin_20250815_040728",
-    "metrics": "results/sim_026_roundrobin_20250815_040728_metrics.csv"
+  "sim_031_roundrobin_": {
+    "zip": "sim_packs/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_pack.zip",
+    "base": "results/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413",
+    "metrics": "results/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_metrics.csv"
   }
 }

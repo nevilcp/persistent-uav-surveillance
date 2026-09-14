@@ -1,0 +1,25 @@
+{
+  "sim_027_roundrobin_20260914_190727": [
+    "figures/sim_027_roundrobin_20260914_190727_v1_coverage_time.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_coverage_time_band.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_violations_time.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_fleet_state.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_cost_index.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_revisit_hist_early.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_revisit_hist_mid.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_revisit_hist_late.png",
+    "figures/sim_027_roundrobin_20260914_190727_v1_revisit_percentiles.png"
+  ],
+  "sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413": [
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_coverage_time.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_coverage_time_band.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_violations_time.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_fleet_state.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_cost_index.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_soc_traces.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_revisit_hist_early.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_revisit_hist_mid.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_revisit_hist_late.png",
+    "figures/sim_031_roundrobin_FAIL-time-u03-t1800_20260914_191413_v1_revisit_percentiles.png"
+  ]
+}

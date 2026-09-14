@@ -127,10 +127,10 @@ def build_packs(prefixes: List[str]) -> Dict[str, Dict[str, str]]:
 
 if __name__ == "__main__":
     default_prefixes = [
-        "sim_020_roundrobin_",
-        "sim_023_roundrobin_",
-        "sim_024_roundrobin_",
-        "sim_025_roundrobin_",
-        "sim_026_roundrobin_",
+        "sim_027_roundrobin_",
+        "sim_028_roundrobin_",
+        "sim_029_roundrobin_",
+        "sim_030_roundrobin_",
+        "sim_031_roundrobin_",
     ]
     build_packs(default_prefixes)

@@ -1,0 +1,8 @@
+1800,failure_trigger,03,
+1800,contingency_promoted,21,
+1860,bridge_insert,21,cell=cell_009_005
+1950,bridge_insert,05,cell=cell_004_002
+1980,bridge_insert,11,cell=cell_006_010
+2010,bridge_insert,20,cell=cell_002_010
+2160,bridge_insert,17,cell=cell_008_002
+3030,bridge_insert,15,cell=cell_000_002
