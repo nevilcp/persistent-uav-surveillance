@@ -9,8 +9,18 @@ import re
 import sys
 
 TYPES = (
-    "feat", "fix", "refactor", "perf", "style", "test", "docs",
-    "build", "ci", "ops", "chore", "revert",
+    "feat",
+    "fix",
+    "refactor",
+    "perf",
+    "style",
+    "test",
+    "docs",
+    "build",
+    "ci",
+    "ops",
+    "chore",
+    "revert",
 )
 HEADER = re.compile(r"^(?P<type>[a-z]+)(\((?P<scope>[^()]+)\))?!?: (?P<desc>.+)$")
 SUBJECT_MAX = 50
@@ -30,25 +40,27 @@ def check(message: str) -> list[str]:
 
     if len(subject) > SUBJECT_MAX:
         problems.append(
-            f"Subject is {len(subject)} characters; limit is {SUBJECT_MAX}.")
+            f"Subject is {len(subject)} characters; limit is {SUBJECT_MAX}."
+        )
     if subject.endswith("."):
         problems.append("Subject ends with a period.")
 
     match = HEADER.match(subject)
     if not match:
-        problems.append(
-            "Subject doesn't match '<type>[(scope)]: <Description>'.")
+        problems.append("Subject doesn't match '<type>[(scope)]: <Description>'.")
     else:
         if match["type"] not in TYPES:
             problems.append(
-                f"Unknown type '{match['type']}'. Use one of: {', '.join(TYPES)}.")
+                f"Unknown type '{match['type']}'. Use one of: {', '.join(TYPES)}."
+            )
         desc = match["desc"]
         if not desc[0].isupper():
             problems.append("Description should start with a capital letter.")
         if NON_IMPERATIVE.match(desc):
             problems.append(
                 f"'{desc.split()[0]}' may not be imperative; use a command "
-                "form like 'Add' or 'Fix' (ignore if it already is).")
+                "form like 'Add' or 'Fix' (ignore if it already is)."
+            )
 
     if len(lines) > 1:
         if lines[1].strip():
@@ -57,7 +69,8 @@ def check(message: str) -> list[str]:
             if len(line) > BODY_MAX and not re.match(r"^\S+$", line):
                 problems.append(
                     f"Body line {number} is {len(line)} characters; "
-                    f"wrap at {BODY_MAX}.")
+                    f"wrap at {BODY_MAX}."
+                )
 
     return problems
 
