@@ -1,0 +1,9 @@
+{
+  "region": {"width": 500.0, "length": 500.0, "cell_size": 40.0, "depot": [-500.0, 0.0]},
+  "uav": {"speed": 6.0, "endurance": 2100.0, "sigma_min": 0.1, "turnaround": 60.0, "sensing_radius": 30.0},
+  "fleet": {"size": 21, "batch_size": 4, "reserve_fraction": 0.03, "fly_cost": 1.0, "reserve_cost": 1.2},
+  "schedule": {"batch_period": 150.0, "launch_gap": 60.0},
+  "dispatch": {"return_buffer": 0.02, "prelaunch_margin": 0.06},
+  "failure": {"enabled": false, "route": 10, "time": 1800.0, "age_margin": 60.0, "recovery_tolerance": 120.0},
+  "mission": {"duration": 4800.0, "time_step": 1.0, "revisit_threshold": 180.0, "steady_state_start": 1200.0}
+}

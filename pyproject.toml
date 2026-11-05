@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uav-surveil"
+version = "2.0.0"
+description = "Simulator for persistent UAV-swarm surveillance with battery-aware replacement and failure recovery"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Nevil C Prince" }]
+keywords = ["uav", "swarm-robotics", "persistent-surveillance", "scheduling", "simulation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+]
+requires-python = ">=3.14"
+dependencies = []  # the simulator uses only the standard library
+
+[project.optional-dependencies]
+# figures, plus the animation script (numpy and Pillow; ffmpeg is needed on PATH for the mp4s)
+plot = ["matplotlib", "numpy", "pillow"]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/nevilcp/persistent-uav-surveillance"
+
+[tool.setuptools]
+packages = ["uav_surveil"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
