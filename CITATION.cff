@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Persistent UAV Surveillance: a simulator for battery-aware swarm replacement and failure recovery"
+authors:
+  - family-names: "C Prince"
+    given-names: "Nevil"
+version: "2.0.0"
+date-released: "2026-10-29"
+url: "https://github.com/nevilcp/persistent-uav-surveillance"
+repository-code: "https://github.com/nevilcp/persistent-uav-surveillance"
+license: MIT
+type: software
+keywords:
+  - "uav"
+  - "swarm-robotics"
+  - "persistent-surveillance"
+  - "path-planning"
+  - "scheduling"
+  - "stl-monitors"
+  - "optimisation"
+  - "simulation"
+references:
+  - type: software
+    title: "Persistent UAV Surveillance"
+    authors:
+      - family-names: "Navalakhe"
+        given-names: "Abhirva"
+    url: "https://github.com/abhirva/persistent-uav-surveillance"
+    repository-code: "https://github.com/abhirva/persistent-uav-surveillance"
+    year: 2025
