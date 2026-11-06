@@ -20,8 +20,10 @@ requires-python = ">=3.14"
 dependencies = []  # the simulator uses only the standard library
 
 [project.optional-dependencies]
-# figures, plus the animation script (numpy and Pillow; ffmpeg is needed on PATH for the mp4s)
+# figures, plus the matplotlib animation script (numpy and Pillow; ffmpeg is needed on PATH for the mp4s)
 plot = ["matplotlib", "numpy", "pillow"]
+# skia renderer behind assets/demo.gif and assets/videos/ (needs ffmpeg on PATH and the Inter font)
+video = ["numpy", "skia-python"]
 dev = ["pytest"]
 
 [project.urls]
