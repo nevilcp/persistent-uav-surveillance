@@ -10,21 +10,14 @@ endurance at the level of a single UAV becomes persistent coverage at the level
 of the swarm; a reserve UAV takes over when one UAV fails. The simulator runs the
 GSM at 1 Hz and monitors the four STL clauses C1-C4.
 
-<img alt="Animation of the single-failure scenario: UAVs patrol the grid, are relieved from the depot, and a failed UAV is replaced" src="assets/demo.gif">
+<img alt="Animation of the nominal scenario: UAVs patrol the grid and are relieved from the depot as their batteries run down" src="assets/demo.gif">
 
-*The single-failure scenario (N = 21), from two minutes before the failure at
-t = 1800 s to the route's recovery; 40x real time, half that around the failure.
-Tiles run from pale (observed recently) to deep teal (about to breach the revisit
-limit), then amber to red once overdue; hollow tiles have not been observed yet, and
-a tile that was just observed pings with an outline. Chevrons point along each UAV's
-heading, hollow ones are returning to the depot, and an arc appears around any UAV
-below 30 % charge. At the failure a shockwave marks the lost UAV (violet cross), the
-rest of the map fades and the progress strip moves from Failure to Bridging:
-neighbouring UAVs temporarily bridge the most urgent orphan cells (dashed blue links)
-until the contingency UAV reaches the route and takes over. Every MP4 in
-`assets/videos/` opens with a title card and closes on the run's headline number;
-`compare.mp4` puts the three fleet sizes side by side.
-Regenerate with `python scripts/make_animation.py`.*
+*The nominal scenario (N = 21), the whole 4800 s run. Tiles run from red (overdue) to
+green (just observed); each UAV carries its battery level, and fresh UAVs leave the
+depot as the others run low. The single-failure video adds a violet banner that
+follows the response to a lost UAV.
+Regenerate with `python scripts/export_frames.py nominal` then
+`python scripts/render_animation.py results/frames/nominal.json --mode gif`.*
 
 The code follows the original implementation stage by stage.
 `docs/design_notes.md` lists the quantities it leaves open and how they
@@ -34,13 +27,14 @@ were chosen.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,plot]"          # Python >= 3.14; the simulator itself needs no packages
+pip install -e ".[dev,plot,video]"    # Python >= 3.14; the simulator itself needs no packages
 
-pytest                                 # 61 tests, ~2 s
+pytest                                 # 56 tests, ~2 s
 python -m uav_surveil                  # nominal run (N = 21, 4800 s), summary on stdout
 python scripts/run_scenarios.py      # the five scenarios, results/ + figures
-python scripts/make_animation.py       # the animation above, assets/demo.gif
-python scripts/make_animation.py --scenario all --format mp4   # one video per scenario, assets/videos/
+python scripts/export_frames.py all    # per-frame state of every scenario, results/frames/
+python scripts/render_animation.py results/frames/nominal.json --mode gif   # the animation above, assets/demo.gif
+python scripts/render_animation.py results/frames/nominal.json                     # one video, assets/videos/ (needs ffmpeg)
 ```
 
 Command-line options for a single run:
@@ -76,7 +70,7 @@ ages), `uav.py` (UAV state).
 uav_surveil/   the package, one module per stage
 configs/       baseline.json - the nominal parameters
 scripts/       run_scenarios.py - runs the five scenarios and draws the figures
-               make_animation.py - renders the README GIF and the MP4 videos from the simulator
+               export_frames.py - per-frame JSON of a scenario; render_animation.py - draws the README GIF and the MP4 videos from it
 assets/        demo.gif - the animation shown above; videos/ - full-length MP4 of each scenario
 tests/         unit tests per stage and whole-loop invariants
 docs/          implementation notes and figures
