@@ -26,17 +26,33 @@ def test_port_export_maps_freshness_to_free_cells_and_records_closure():
     data = dump('R6', params)
     assert len(data['cells']) == len(data['frames'][0]['fresh']) == 830
     assert len(data['depots']) == 3 and len(data['zones']) == 3
-    assert data['loop_polyline']
+    assert data['planner'] == 'choset_round_robin'
+    assert len(data['routes']) == 87
+    assert data['loop_polyline'] == []
     assert data['frames'][0]['closed_depots'] == []
     assert data['frames'][1]['closed_depots'] == [2]
+    assert data['events'] == [{'t': 1.0, 'kind': 'closure', 'uav': '-', 'detail': 'base 2'}]
     x0, x1, y0, y1 = data['extent']
     assert all(x0 < x < x1 and y0 < y < y1 for x, y in data['depots'])
+
+
+def test_choset_export_records_each_failure_and_failed_airframe():
+    params = scenario('R5')
+    params = replace(params, mission=replace(params.mission, duration=510.0),
+                     failure=replace(params.failure, time=500.0, later_times=(502.0, 504.0, 506.0)))
+    data = dump('R5', params)
+    assert [e['t'] for e in data['events']] == [500.0, 502.0, 504.0, 506.0]
+    assert all(e['kind'] == 'failure' for e in data['events'])
+    assert data['frames'][499]['failed_uavs'] == []
+    assert len(data['frames'][-1]['failed_uavs']) == 4
+    assert set(data['frames'][-1]['failed_uavs']) == {f"{e['uav']:02d}" for e in data['events']}
 
 
 def test_renderer_handles_extended_geometry_and_single_frame(tmp_path):
     pytest.importorskip('skia')
     pytest.importorskip('numpy')
     import json
+
     import render_animation as renderer
     params = scenario('R4')
     data = dump('R4', replace(params, mission=replace(params.mission, duration=1.0)))

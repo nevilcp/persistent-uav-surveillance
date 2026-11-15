@@ -6,6 +6,7 @@ import math
 import re
 import subprocess
 import time
+from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
 
@@ -23,7 +24,10 @@ LOST_SHOWN = 20.0  # seconds the first banner message stays up
 SNAP = 25.0  # metres; a larger jump between ticks is a relaunch or swap, not flight
 INK, MUTED, RULE = "#14181f", "#586174", "#e3e6eb"  # muted holds 6:1 on white at the 12 px minimum
 BG, CARD = "#f4f5f7", "#ffffff"
-FAIL = "#6d28d9"
+FAIL = "#9a3412"
+ZONE = "#1E1B3A"
+ZONE_LINE = "#C4B5FD"
+ZONE_BORDER = "#A78BFA"
 DEPOT = "#e5383b"
 PALETTES = {  # red -> green as RdYlGn; stops at 0, .25, .5, .75, 1
     "A": ["#b3262d", "#ea6a3c", "#f3d263", "#86c06c", "#1c7c4d"],
@@ -124,9 +128,15 @@ def advances(f, s, tab):
     return [zero if tab and ch.isdigit() else f.measureText(ch) for ch in s]
 
 
+@lru_cache(maxsize=4096)
+def style_advances(style, s, tab):
+    return tuple(advances(FONTS.get(style), s, tab))
+
+
+@lru_cache(maxsize=4096)
 def measure(style, s, tab=False):
     f = FONTS.get(style)
-    return sum(advances(f, s, True)) if tab else f.measureText(s)
+    return sum(style_advances(style, s, True)) if tab else f.measureText(s)
 
 
 def text(cv, s, x, y, style, c=INK, align="left", tab=False):
@@ -136,8 +146,8 @@ def text(cv, s, x, y, style, c=INK, align="left", tab=False):
     if not tab:
         cv.drawString(s, x, y, f, fill(c))
         return w
-    for ch, adv in zip(s, advances(f, s, True)):
-        gx = x + (adv - f.measureText(ch)) / 2 if ch.isdigit() else x
+    for ch, adv in zip(s, style_advances(style, s, True)):
+        gx = x + (adv - measure(style, ch)) / 2 if ch.isdigit() else x
         cv.drawString(ch, gx, y, f, fill(c))
         x += adv
     return w
@@ -199,7 +209,8 @@ class Run:
         self.fr = fr
         self.slots = {k: max((fmt(f) for f in fr), key=len) for k, fmt in SLOT_FIELDS.items()}
         self.failure = d["failure"]
-        self.has_failure = self.failure is not None
+        self.events = d.get("events", [])
+        self.has_failure = self.failure is not None or bool(self.events)
         self.cells = d["cells"]
         self.depot = d["depot"]
         self.depots = d.get("depots", [self.depot])
@@ -208,9 +219,29 @@ class Run:
         XLIM, YLIM = (-550.0, 550.0), (-50.0, 550.0)
         if self.extended:
             XLIM, YLIM = tuple(d["extent"][:2]), tuple(d["extent"][2:])
+        cx, cy = (XLIM[0] + XLIM[1]) / 2, (YLIM[0] + YLIM[1]) / 2
+        if self.extended:
+            cx, cy = 600, 850
+        XLIM, YLIM = (cx - 1135, cx + 1135), (cy - 895, cy + 895)
         SCALE = PLOT[2] / (XLIM[1] - XLIM[0])
         PLOT_H = (YLIM[1] - YLIM[0]) * SCALE
-        self.title, self.meta = d["title"], d["meta"]
+        self.title = " ".join(d["title"].split()).title()
+        self.meta = "  |  ".join(
+            " ".join(part.replace("_", " ").split()).title()
+            for part in d["meta"].split("|")
+        )
+        self.meta = re.sub(r"\bUavs\b", "UAVs", self.meta)
+        self.meta = re.sub(r"\bUav\b", "UAV", self.meta)
+        self.meta = re.sub(r"\b1 Depots\b", "1 Depot", self.meta)
+        self.zone_path = skia.Path()
+        for x0, y0, x1, y1 in d.get("zones", []):
+            rect = skia.Path()
+            rect.addRect(skia.Rect.MakeLTRB(*px(x0, y1), *px(x1, y0)))
+            self.zone_path = skia.Op(self.zone_path, rect, skia.PathOp.kUnion_PathOp)
+        strip = skia.Path()
+        stroke(ZONE_BORDER, 3).getFillPath(self.zone_path, strip)
+        self.zone_border = skia.Op(self.zone_path, strip, skia.PathOp.kDifference_PathOp)
+
         half = d["cell_size"] / 2
         self.rects = [
             skia.Rect.MakeLTRB(*px(x - half, y + half), *px(x + half, y - half)).makeInset(1.3, 1.3) for x, y in self.cells
@@ -228,16 +259,16 @@ class Run:
         jump = np.hypot(b[:, 0] - a[:, 0], b[:, 1] - a[:, 1]) > SNAP
         u = a + (b - a) * f
         u[jump] = a[jump]
-        return i, fresh, u
+        return min(int(pos), self.n - 1), fresh, u
 
 
 def canvas_h(run):
-    return round(PLOT[1] + PLOT_H + 34 + PAD + (BANNER_H if run.has_failure else 0))
+    return round(PLOT[1] + PLOT_H + 55 + PAD + BANNER_H)
 
 
 def draw_axes(cv, extended=False):
     left, top, w = PLOT
-    cv.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(left, top, w, PLOT_H), 8, 8), fill("#fafbfc"))
+    cv.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(left, 62, w, PLOT_H + top - 62), 8, 8), fill("#fafbfc"))
     step = 200 if extended else 100
     xs = range(math.ceil(XLIM[0] / step) * step, math.floor(XLIM[1] / step) * step + 1, step) if extended else range(-500, 501, 100)
     ys = range(math.ceil(YLIM[0] / step) * step, math.floor(YLIM[1] / step) * step + 1, step) if extended else range(0, 501, 100)
@@ -249,6 +280,12 @@ def draw_axes(cv, extended=False):
         y = px(0, v)[1]
         cv.drawLine(left, y, left + w, y, stroke("#eceef2", 1))
         text(cv, f"{v}", left - 9, y + 4, "tick", MUTED, "right", tab=True)
+    text(cv, "x (m)", left + w / 2, top + PLOT_H + 39, "tick", MUTED, "center")
+    cv.save()
+    cv.translate(15, top + PLOT_H / 2)
+    cv.rotate(-90)
+    text(cv, "y (m)", 0, 0, "tick", MUTED, "center")
+    cv.restore()
 
 
 def marker(cv, x, y, r, soc_color):
@@ -269,22 +306,6 @@ def draw_uav(cv, x, y, soc, uid):
     chip_box(cv, x - 33, y + 11, 66, 18, 5, 240)
     text(cv, uid, x - 28, y + 24, "chip_id", INK)
     text(cv, f"{soc * 100:.0f}%", x + 29, y + 24, "chip_soc", MUTED, "right", tab=True)
-
-
-def draw_parked(cv, run, parked, base=0):
-    """Chip grid of the UAVs parked on the depot, where raw positions coincide."""
-    dx, dy = px(*run.depots[base])
-    cols, cw, ch = 3, 98, 24
-    for k, (uid, soc) in enumerate(parked):
-        c, r = k % cols, k // cols
-        x, y = PLOT[0] + 10 + c * (cw + 5), dy - 38 - r * (ch + 5) - ch
-        if run.extended:
-            x = min(max(dx - 150, PLOT[0] + 10), PLOT[0] + PLOT[2] - 320) + c * (cw + 5)
-            y = min(max(dy + 32, PLOT[1] + 145), PLOT[1] + PLOT_H - 30 - math.ceil(len(parked) / cols) * (ch + 5)) + r * (ch + 5)
-        chip_box(cv, x, y, cw, ch, 7)
-        marker(cv, x + 14, y + 12.5, 6, ramp(soc))
-        text(cv, uid, x + 28, y + 16.5, "chip_id", INK)
-        text(cv, f"{soc * 100:.0f}%", x + cw - 9, y + 16.5, "chip_soc", MUTED, "right", tab=True)
 
 
 def draw_hud(cv, run, st):
@@ -312,10 +333,12 @@ def draw_hud(cv, run, st):
             x += lw + 6 + measure("value", widest_value, True)
 
 
-def draw_legend(cv):
+def draw_legend(cv, zones=False):
     x1 = PLOT[0] + PLOT[2] - 12
     y = PLOT[1] + 12
     w = 24 + measure("label", "Depot") + 26 + 26 + measure("label", "UAVs") + 14
+    if zones:
+        w += 38 + measure("label", "No-fly zone")
     chip_box(cv, x1 - w, y, w, 32, 9, 246)
     x = x1 - w + 14
     cv.drawPath(star(x + 7, y + 16, 8), fill(DEPOT))
@@ -323,6 +346,19 @@ def draw_legend(cv):
     x += text(cv, "Depot", x, y + 21, "label", INK) + 22
     marker(cv, x + 7, y + 16.5, 7, "#cbd2dc")
     text(cv, "UAVs", x + 22, y + 21, "label", INK)
+    if zones:
+        x += 22 + measure("label", "UAVs") + 18
+        box = skia.Rect.MakeXYWH(x, y + 10, 13, 13)
+        cv.drawRect(box, fill(ZONE, 224))
+        cv.save()
+        cv.clipRect(box)
+        for offset in (-10, 4, 18):
+            cv.drawLine(x + offset, y + 23, x + offset + 13, y + 10, stroke(ZONE_LINE, 1.5, 89))
+        cv.restore()
+        outline = stroke(ZONE_BORDER, 1)
+        outline.setPathEffect(skia.DashPathEffect.Make([3, 2], 0))
+        cv.drawRect(box.makeInset(1, 1), outline)
+        text(cv, "No-fly zone", x + 20, y + 21, "label", INK)
 
 
 def draw_colorbar(cv):
@@ -356,18 +392,32 @@ def banner_text(f, t):
         return None
     route = f["route"]
     if t < f["t_fail"] + LOST_SHOWN:
-        return f"UAV {f['uav']} lost at {f['t_fail']:,.0f} s"
+        return f"UAV {f['uav']} was lost at {f['t_fail']:,.0f} seconds."
     if f["t_handover"] is not None and t >= f["t_handover"]:
         if f["t_restored"] is not None and t >= f["t_restored"]:
-            return "Coverage restored"
-        return f"Spare UAV {f['spare']} now covering route {route}"
+            return "Recovery is complete and coverage is restored."
+        return f"Spare UAV {f['spare']} is covering route {route}."
     if f["t_launch"] is not None and t >= f["t_launch"]:
-        return f"Spare UAV {f['spare']} flying to take over route {route}"
-    return "Failure detected  ·  launching spare"
+        return f"Spare UAV {f['spare']} is flying to route {route}."
+    return "A UAV failure was detected and spare deployment is pending."
 
 
 def draw_banner(cv, run, st, h):
-    s = banner_text(run.failure, st["t"])
+    if run.events:
+        # Events are injected at the start of a step; frames are sampled at its end.
+        past = [e for e in run.events if e["t"] < st["t"]]
+        event = past[-1] if past else None
+        if event is None:
+            return
+        if event["kind"] == "closure":
+            base = int(event["detail"].split()[-1]) + 1
+            s = f"Depot D{base} closed at {event['t']:,.0f} seconds. UAVs return to open depots."
+        else:
+            count = sum(e["kind"] == "failure" for e in past)
+            total = "1 failure has" if count == 1 else f"{count} failures have"
+            s = f"UAV {event['uav']} was lost at {event['t']:,.0f} seconds; {total} been recorded."
+    else:
+        s = banner_text(run.failure, st["t"])
     if s is None:
         return
     w = measure("small", s) + 36
@@ -382,13 +432,7 @@ def draw_banner(cv, run, st, h):
 def draw_frame(cv, run, pos, h):
     i, fresh, uav = run.at(pos)
     st = run.fr[i]
-    cv.clear(color(BG))
-    rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(PAD / 2, PAD / 2, W - PAD, h - PAD), 16, 16)
-    shadow = fill("#101828", 10)
-    shadow.setMaskFilter(skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, 5))
-    cv.drawRRect(rr.makeOffset(0, 2), shadow)
-    cv.drawRRect(rr, fill(CARD))
-    cv.drawRRect(rr, stroke(RULE, 1))
+    cv.clear(color(CARD))
 
     tw = text(cv, run.title, PLOT[0], 42, "title", INK)
     text(cv, run.meta, PLOT[0] + tw + 16, 42, "meta", MUTED)
@@ -397,8 +441,27 @@ def draw_frame(cv, run, pos, h):
     for r, v in zip(run.rects, fresh):
         cv.drawRRect(skia.RRect.MakeRectXY(r, 3.5, 3.5), fill(ramp(float(v))))
 
-    for x0, y0, x1, y1 in run.d.get("zones", []):
-        cv.drawRect(skia.Rect.MakeLTRB(*px(x0, y1), *px(x1, y0)), fill("#9ca3af"))
+    if not run.zone_path.isEmpty():
+        cv.drawPath(run.zone_path, fill(ZONE, 224))
+        cv.save()
+        cv.clipPath(run.zone_path, doAntiAlias=True)
+        bounds = run.zone_path.getBounds()
+        height = bounds.height()
+        spacing = 10 * math.sqrt(2)
+        start = math.floor((bounds.left() - height) / spacing) * spacing
+        x = start
+        hatch = stroke(ZONE_LINE, 1.5, 89)
+        while x < bounds.right() + height:
+            cv.drawLine(x, bounds.bottom(), x + height, bounds.top(), hatch)
+            x += spacing
+        cv.restore()
+        border = stroke(ZONE_BORDER, 2)
+        border.setPathEffect(skia.DashPathEffect.Make([6, 4], 0))
+        glow = stroke(ZONE_BORDER, 2, 150)
+        glow.setPathEffect(skia.DashPathEffect.Make([6, 4], 0))
+        glow.setMaskFilter(skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, 4))
+        cv.drawPath(run.zone_border, glow)
+        cv.drawPath(run.zone_border, border)
     points = run.d.get("loop_polyline", [])
     if points:
         path = skia.Path()
@@ -416,18 +479,21 @@ def draw_frame(cv, run, pos, h):
 
     parked, flying = [[] for _ in run.depots], []
     for uid, (x, y, soc) in zip(run.ids, uav):
+        if uid in st.get("failed_uavs", []):
+            fx, fy = px(x, y)
+            cv.drawLine(fx - 6, fy - 6, fx + 6, fy + 6, stroke(FAIL, 2.5))
+            cv.drawLine(fx - 6, fy + 6, fx + 6, fy - 6, stroke(FAIL, 2.5))
+            continue
         base = next((m for m, p in enumerate(run.depots) if math.hypot(x - p[0], y - p[1]) < 1.0), None)
         if base is not None:
             parked[base].append((uid, float(soc)))
         else:
             flying.append((uid, x, y, float(soc)))
-    for base, group in enumerate(parked):
-        draw_parked(cv, run, sorted(group), base)
     for uid, x, y, soc in sorted(flying, key=lambda u: -u[2]):
         draw_uav(cv, *px(x, y), soc, uid)
 
     draw_hud(cv, run, st)
-    draw_legend(cv)
+    draw_legend(cv, bool(run.d.get("zones")))
     draw_colorbar(cv)
     if run.has_failure:
         draw_banner(cv, run, st, h)
@@ -435,7 +501,7 @@ def draw_frame(cv, run, pos, h):
 
 class Encoder:
     def __init__(self, path, w, h, fps, crf):
-        head = ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps), "-i", "-"]
+        head = ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{w}x{h}", "-r", str(fps), "-i", "-"]
         if str(path).endswith(".gif"):  # straight from rgb so no chroma subsampling reaches the palette
             tail = ["-vf", "split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
                     "-loop", "0", str(path)]
@@ -448,7 +514,8 @@ class Encoder:
 
     def close(self):
         self.p.stdin.close()
-        self.p.wait()
+        if self.p.wait():
+            raise RuntimeError("ffmpeg failed to encode the animation")
 
 
 def render(run, positions, out, fps, crf=18, limit=None, scale=1.0):
@@ -464,7 +531,7 @@ def render(run, positions, out, fps, crf=18, limit=None, scale=1.0):
         draw_frame(cv, run, pos, h0)
         cv.restore()
         arr = surface.makeImageSnapshot().toarray(colorType=skia.kRGBA_8888_ColorType)
-        enc.write(np.ascontiguousarray(arr[..., :3]).tobytes())
+        enc.write(arr.tobytes())
         if n % 1000 == 0:
             print(f"  {n}/{len(positions)} {time.time() - t0:.0f}s", flush=True)
     enc.close()
@@ -486,6 +553,7 @@ def main():
     ap.add_argument("--mode", choices=["video", "gif", "still"], default="video")
     ap.add_argument("--fps", type=float, help="default 30 for a video, 12 for a gif")
     ap.add_argument("--gif-frames", type=int, default=144)
+    ap.add_argument("--speed", type=float, default=20.0, help="simulation seconds per video second")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--stepped", action="store_true")
     ap.add_argument("--scale", type=float, default=1.6, help="size relative to the 1200 px layout")
@@ -497,8 +565,8 @@ def main():
     run = Run(a.data)
     stem = re.sub(r"[^a-z0-9]+", "-", a.data.stem.lower()).strip("-") or "scenario"
     defaults = {
-        "video": Path(f"assets/videos/{stem}.mp4"),
-        "gif": Path(f"assets/{stem}-surveillance.gif"),
+        "video": Path(f"assets/multi_depot/videos/{stem}.mp4"),
+        "gif": Path(f"assets/multi_depot/{stem}-surveillance.gif"),
         "still": Path(f"results/{stem}.png"),
     }
     out = a.out or defaults[a.mode]
@@ -512,10 +580,10 @@ def main():
         draw_frame(cv, run, a.at, h)
         surface.makeImageSnapshot().save(str(out), skia.kPNG)
     elif a.mode == "video":
-        render(run, video_positions(run, a.fps or 30), out, a.fps or 30, limit=a.limit, scale=a.scale)
+        render(run, video_positions(run, a.fps or 30, speed=a.speed), out, a.fps or 30, limit=a.limit, scale=a.scale)
     else:
         LEVELS = 32
-        render(run, gif_positions(run, a.gif_frames), out, a.fps or 12, crf=10)
+        render(run, gif_positions(run, a.gif_frames), out, a.fps or 12, crf=10, scale=a.scale)
 
 
 if __name__ == "__main__":

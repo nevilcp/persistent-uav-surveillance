@@ -74,7 +74,7 @@ Four assumptions in the paper are convenient but limiting. The two proposed exte
 - **An implicit one-at-a-time depot.** The depot's limit of handling one drone at a time is never stated. It appears only through the rule that launches must be spaced at least τ apart.
 - **Spread-out routes.** Round-robin spreads every route over the whole region, and the failure repair quietly relies on this, because a failed route's cells then have neighbouring routes everywhere.
 
-**What stays the same:** the six-stage architecture, the round-robin and boustrophedon routing baseline, the ILP fleet split and the STL runtime checks are all kept. The proposed revision at the end replaces round-robin with one shared loop, to be tested against it.
+**What stays the same:** the six-stage architecture, the round-robin and boustrophedon routing baseline, the ILP fleet split and the STL runtime checks are all kept. Choset boustrophedon decomposition followed by round-robin assignment is the primary path planner. The shared-loop planner has been removed. Randomised assignment is a possible later extension to this primary method.
 
 **What changes:**
 
@@ -85,7 +85,7 @@ Four assumptions in the paper are convenient but limiting. The two proposed exte
 
 ## Extension A: multiple depots outside the region
 
-Let the depots be D₁, …, Dₘ. Each route is given a *launch depot* and a *recovery depot*, which may be different. This fits the paper's own wording of a "depot-to-depot patrol loop". With several depots, drones can start closer to their routes, but the system must now decide which depot serves which route and how many drones each depot holds.
+Let the depots be D₁, …, Dₘ. Each depot must lie outside the surveillance region A, exactly 500 m from its nearest point on the outer boundary ∂A: min_{q ∈ ∂A} ‖Dₘ − q‖₂ = 500 m. This geometric setback is measured to the region boundary, not to a cell centre or an NFZ boundary; ferry costs still use shortest flyable distance d_G. Each route is given a *launch depot* and a *recovery depot*, which may be different. This fits the paper's own wording of a "depot-to-depot patrol loop". With several depots, drones can start closer to their routes, but the system must now decide which depot serves which route and how many drones each depot holds.
 
 ### A1. Per-route ferry legs instead of one worst case
 
@@ -115,7 +115,7 @@ $$
 L = \lambda W, \qquad \lambda = \frac{n_{fly}}{T_{use} - 2\bar T_{ferry}}, \qquad W = 2\bar T_{ferry} + \tau, \qquad L = n_{rotate}
 $$
 
-With the paper's numbers (T\_use = 1890 s, τ = 60 s, ferry about 83–186 s) this gives roughly 2–5 rotation drones, against the paper's n\_rotate = 4. Being an average, it is a floor, not a sizing rule: with 4 rotation drones the baseline implementation's pool runs empty when batch-launched drones return together. Once returns are evenly phased (see the proposed revision at the end), the floor is close to sufficient and could replace the paper's ad hoc constraint n\_rotate ≥ N\_batch (rotation drones at least as many as one launch batch). It also shows that closer depots free up drones for surveillance.
+With the paper's numbers (T\_use = 1890 s, τ = 60 s, ferry about 83–186 s) this gives roughly 2–5 rotation drones, against the paper's n\_rotate = 4. Being an average, it is a floor, not a sizing rule: with 4 rotation drones the baseline implementation's pool runs empty when batch-launched drones return together. Evenly phased returns could make this floor closer to sufficient and could replace the paper's ad hoc constraint n\_rotate ≥ N\_batch (rotation drones at least as many as one launch batch). It also shows that closer depots free up drones for surveillance.
 
 ### A3. A depot-aware fleet-split ILP
 
@@ -143,9 +143,13 @@ $$
 
 ### A4. Partitioning the free cells among the depots
 
-The free cells are divided among the depots before any routes are built, so each depot's routes only ever contain cells of its own sector. For every depot m, the shortest flyable distance d\_G(m, c) to every free cell c is computed with Dijkstra's algorithm (see B2). A cell goes to the depot that minimises d\_G(m, c) + w\_m, where w\_m is an offset per depot. All offsets start at zero. The offset of a depot that holds too many cells is raised and the offset of one that holds too few is lowered, until each depot's number of cells is proportional to its weight, which is its drone count N\_m, to within about 5%. Any piece of a sector that is cut off from the rest of that sector is then handed to the neighbouring sector it touches, so that every sector is connected. The partition is computed offline, and computed again from scratch after a rearrangement (A8).
+Assign each free cell to the depot with the shortest flyable distance d_G, breaking ties by depot index. Allocate flying drones in proportion to sector cell counts using largest remainders, with at least one flyer per nonempty sector and no empty routes. Apply Choset decomposition and round-robin separately within each sector. This keeps route waypoints local to their serving depot; NFZ-safe connectors may leave the sector.
+
+The implementation uses unweighted nearest-depot sectors. Capacity-weighted balancing and a connected-sector repair are future work, so equal cell counts or equal per-depot inventories are not assumed. On the fixed 500 m-setback map the west, east and north sectors contain 309, 290 and 231 cells, served by 32, 30 and 25 flying drones respectively. Rotation and spare inventories are apportioned by route count.
 
 ### A5. Dispatch changes (Stage 4)
+
+The following are design targets. The current controller implements nearest-open-depot return, but retains a fixed pre-launch battery margin and sends replacements to the route's first waypoint. It does not yet predict an intercept or rebalance inventories to explicit targets.
 
 - **Return to any depot.** The return threshold uses the distance to the *nearest* depot, not a fixed one.
 - **Launch the replacement at the right time.** Launch it when the outgoing drone's remaining flight time falls below the replacement's own ferry time plus a margin, instead of using one fixed pre-launch margin.
@@ -166,25 +170,25 @@ $$
 
 A *correlated* failure is one where several things fail together for a shared reason, here a depot going out of service. The paper lists correlated failures as future work. An outage is handled like Stage 5: only the affected routes are reassigned to other depots, a longer ferry is accepted for a while, and battery feasibility is checked before switching.
 
-### A7. The round-robin trade-off (the key design question)
+### A7. Primary planner: Choset decomposition plus round-robin
 
-Round-robin routes are spread over the whole region, so each is about equally far from every depot. Extra depots therefore barely shorten any ferry. To gain from more depots, routes must be **spatially grouped**, for example as contiguous stretches of the boustrophedon order or as sectors around each depot.
+Use Choset decomposition inside each depot sector, then deal the resulting ordered free cells round-robin among that sector's flyers. The decomposition supplies obstacle-aware coverage structure; round-robin distributes the waypoints across several routes. Every consecutive waypoint pair, including the closing leg, is connected by a shortest flyable path. The shared-loop alternative is removed.
 
-But the paper's failure repair relies on spread-out routes: when a drone fails, its cells have neighbouring routes on all sides. Grouped routes would leave one contiguous hole instead. This trade-off between *ferry efficiency* and *failure robustness* is left for later work. The experiments below fix one hybrid: round-robin inside each depot's sector.
+Round-robin within sectors retains interleaving for failure bridging while limiting long cross-region travel. It is deterministic unless a separate randomisation policy is added. It gives no analytic worst-cell-age guarantee: measure coverage, cell age, battery margins and failure recovery in simulation.
 
 ### A8. Scaling up: a constant-fraction fleet per depot
 
 To test the design at scale, the region is enlarged (more cells) and the fleet grows with it, for example to 120 drones served by three depots. The governing rule is that every depot keeps the same shares of flying, rotation and spare drones, with no fixed minimum or maximum count for any group.
 
-**The rule.** Let N\_m be the drones assigned to depot m, so that the N\_m sum to N. The shares φ\_fly, φ\_rot and φ\_spare add up to 1 and come from the fleet-split ILP for the paper's fleet (16 : 4 : 1); the 29 : 9 : 2 split of the experiments below is set by hand from the rotation check further down. Each depot's groups are then:
+**The rule.** Let N\_m be the drones assigned to depot m, so that the N\_m sum to N. The shares φ\_fly, φ\_rot and φ\_spare add up to 1. The reference global split is 87 : 27 : 6 for 120 drones; the following per-depot rounding rule is a future capacity-balancing proposal rather than the implemented route-count apportionment. Each depot's groups are then:
 
 $$
 n_{fly,m} = \mathrm{round}(\varphi_{fly}\,N_m), \qquad n_{rot,m} = \mathrm{round}(\varphi_{rot}\,N_m), \qquad n_{spare,m} = N_m - n_{fly,m} - n_{rot,m}
 $$
 
-The spare group takes the rounding remainder, so the three counts always add up to N\_m. The flying and rotation counts are rounded to the nearest whole drone, and if the remainder would fall below one, a drone moves from rotation to spare, so the spare count is never below one, so every depot keeps a spare. In the experiments this replaces the set-cover choice of spare placement in A3: with a spare at every depot, each route has one within its own sector. A depot's size N\_m is fixed first, from its service capacity κₘ or equally as in the experiments, and the partition of A4 then follows it. Deriving N\_m from the partition as well would be circular, since A4 weights the partition by N\_m.
+The spare group takes the rounding remainder, so the three counts always add up to N\_m. The flying and rotation counts are rounded to the nearest whole drone, and if the remainder would fall below one, a drone moves from rotation to spare, so the spare count is never below one, so every depot keeps a spare. In the experiments this replaces the set-cover choice of spare placement in A3: with a spare at every depot, each route has one within its own sector. A depot's size N\_m is fixed first, from its service capacity κₘ or equally as in the experiments, and a future capacity-weighted partition could then follow it. The implemented A4 instead fixes geometric sectors first and apportions inventory by route count. A future weighted scheme must avoid deriving inventories and partition weights circularly.
 
-In the experiments the partition balances the cells, so the 120 drones are split equally, 40 per depot. With shares of 0.72 flying, 0.23 rotation and 0.05 spare, each depot's groups come out as follows:
+For a future balanced-sector experiment, the target could be 120 drones split equally, 40 per depot. This table is a design target, not the allocation in the current simulation. With shares of 0.72 flying, 0.23 rotation and 0.05 spare, each depot's groups come out as follows:
 
 | Depot | Assigned | Flying | Rotation | Spare |
 | --- | --- | --- | --- | --- |
@@ -195,10 +199,10 @@ In the experiments the partition balances the cells, so the 120 drones are split
 
 **Consecutive failures.** While a depot still has a spare, a failure is absorbed: the spare takes over the failed route (Stage 5), the flying and rotation counts stay as they were, and only the spare group shrinks. Failures can therefore repeat without any change to the cell assignment until that depot's spares are gone.
 
-**Spare exhaustion triggers a rearrangement.** When a depot has no spare left and one of its flying drones fails, the cells of the whole region are redistributed from scratch, as if the allocation were starting again:
+**Future spare-exhaustion rearrangement (not implemented).** The current controller borrows a spare from another open depot; it leaves alarms pending when no spare is available. A future capacity-weighted implementation could instead use the following rearrangement when a depot has no spare left and one of its flying drones fails, the cells of the whole region are redistributed from scratch, as if the allocation were starting again:
 
 1. Recount each depot's surviving drones, N\_m'.
-2. Run the partition of A4 again on all free cells using N\_m' as the weights, with nothing carried over from the old assignment.
+2. Run a capacity-weighted variant of A4 on all free cells using N\_m' as the weights, with nothing carried over from the old assignment.
 3. Reset every depot's groups to the same shares φ of its new total.
 4. Rebuild the routes in every sector (Choset decomposition, then round-robin) and the launch schedules, and give each new route to the nearest drone of that depot. Drones switch one route at a time, each at its next handover, so coverage dips only locally. Switching every drone at once would leave the whole region briefly unwatched and send every drone across it at the same moment, against the local repair of A6. A drone whose battery would not cover the new route returns and is replaced as in A5.
 5. Re-check endurance (A1) and clauses C2, C5 and C6 on all routes, and check the rotation pool of A2 at each depot.
@@ -207,8 +211,8 @@ Because the weights follow surviving drones, every depot ends up with about the 
 
 **Two checks when scaling.**
 
-- The rotation share cannot be copied unchanged from a smaller region. A larger region means longer ferries, and the Little's-law formula in A2 then needs more rotation drones. φ\_rot is recomputed once for each region size and held fixed during operation. For the experiments, Little's law gives 4 to 5 rotation drones per depot: 29 × (2 × 85 + 60) / (1890 − 2 × 85) = 3.9 at the mean ferry of 85 s, and 4.6 at the worst route, with a ferry of 103 s. The baseline implementation needed about 1.8 times the Little's-law figure to launch replacements on time, because returning drones arrive in clusters (about 8 rotation drones where the formula gave 4.4). Each depot therefore gets 9, about twice the formula at the worst route. With evenly phased returns (proposed revision at the end) 5 to 6 per depot are expected to suffice, which would free 9 to 12 drones; the experiments should test both.
-- Depot capacity must grow with the fleet. With 87 flying drones, each replaced about every 1890 − 2 × 85 = 1720 s (85 s is the mean one-way ferry on the experiment map, inside the paper's 83–186 s range), about 0.051 launches start per second, or 0.017 per second at each depot. One slot with τ = 60 s handles 1 / 60 = 0.0167 per second, a 101% load, so one slot is not enough. Each depot therefore has κₘ = 3 slots, a 34% load, which leaves room for the launch clusters that follow the batch schedule.
+- The rotation share cannot be copied unchanged from a smaller region or a smaller depot setback. Recompute each depot's mean and worst ferry times with the 500 m setback before accepting the 29 : 9 : 2 allocation. The earlier estimates of 85 s mean and 103 s worst ferry time, 4–5 rotation drones by Little's law and 5–6 with phased returns assumed depots only 40 m outside; they do not establish feasibility here. The batch-schedule margin must also be measured again.
+- Depot capacity must grow with the fleet. For depot m, estimate λₘ = n_fly,m / (T_use − 2T̄_ferry,m) and check λₘτₘ / κₘ < 1, then simulate queue peaks. The previous 34% load estimate for three slots depended on the old 85 s ferry time. Keep κₘ = 3 as an experimental candidate, subject to this check and C6. The executable port configuration currently uses two slots and must be evaluated separately.
 
 ### New STL clauses
 
@@ -260,7 +264,7 @@ $$
 \lVert a - b \rVert_2 \;\le\; d_G(a, b)
 $$
 
-This matters for safety. The drone's return threshold is set from the straight-line distance, so it would turn back too late and could run out of battery before reaching the depot. That would violate the battery-floor clause C2. On the experiment map, a drone at (920, 760) in the L-shape's pocket is 358 m from D\_E in a straight line but 884 m by the shortest flyable path. The extra 526 m is 0.042 of a battery, twice the baseline's 0.02 return buffer, so it would land with about 0.078 against σ\_min = 0.1.
+This matters for safety. The drone's return threshold is set from the straight-line distance, so it would turn back too late and could run out of battery before reaching the depot. That would violate the battery-floor clause C2. The old example at (920, 760), with D\_E only 40 m outside the region, does not apply to the revised depot positions. Recompute both distances and the selected return depot with the 500 m setback. The extra battery needed for a detour is (d_G − d_Euclidean) / (v T_endure); compare it with the 0.02 return buffer before predicting a violation. A nearest-depot return rule may select another depot, so an obstacle alone does not guarantee that R0 will violate C2.
 
 The fix is to precompute the shortest *flyable* path between every pair of free-cell centres and depots. Two standard methods do this: a *visibility graph* (a network linking points that can see each other without crossing an NFZ) or *Dijkstra's algorithm* (the standard shortest-path search) run on the grid. With the 830 free cells of the experiments this is cheap. Because drones can turn instantly, a shortest path is simply a chain of straight segments that bends only at NFZ corners.
 
@@ -270,7 +274,7 @@ $$
 b_u(t) \le \sigma_{min} + \frac{\min_m \lVert u - D_m \rVert_2}{v\,T_{endure}} \quad\longrightarrow\quad b_u(t) \le \sigma_{min} + \frac{\min_m d_G(u, D_m)}{v\,T_{endure}}
 $$
 
-*Experiments use d\_G only.* Every distance in the simulation is a shortest flyable distance computed with Dijkstra's algorithm on the cell grid, and straight-line distance is not used anywhere.
+*Flyable-path implementation.* A clear straight segment is used directly because it is already a shortest flyable path. When an NFZ blocks that segment, cached Dijkstra paths through the free-cell graph supply a detour. Thus the implementation combines any-angle clear links and grid detours; it does not force every leg onto the grid. R0 deliberately uses a straight-line battery-return estimate as a control.
 
 ### B3. NFZ-aware route generation
 
@@ -329,71 +333,71 @@ More depots shrink the bracketed term. NFZs shrink N\_free but raise κ\_det. Th
 
 ## Proposed experiments
 
-Five runs on one fixed map show what the proposed approach adds. Everything not listed as a difference between runs is held fixed.
+The following runs on one fixed map test what the proposed approach adds. Everything not listed as a difference between runs is held fixed.
 
 **Fixed setup**
 
 - **Region:** 30 × 30 cells of 40 m (1200 m × 1200 m, 900 cells). This keeps the paper's cell size, Θ = 180 s, T\_use = 1890 s and τ = 60 s.
-- **Fleet:** 120 drones, 40 at each depot, each split 29 : 9 : 2 as in A8 into 87 flying, 27 rotation and 6 spare, with κₘ = 3 service slots per depot. The map has 830 free cells, about 9.5 per flying drone, against 9.0 in the baseline implementation (144 cells, 16 flying). The load per drone is therefore close to the baseline's.
+- **Fleet:** 120 drones split globally into 87 flying, 27 rotation and 6 spare. Flying drones follow sector cell counts and reserves follow route counts (A4), with κₘ = 2 service slots per depot, matching `configs/port.json`. The map has 830 free cells, about 9.5 per flying drone, against 9.0 in the baseline implementation (144 cells, 16 flying). The load per drone is therefore close to the baseline's.
 - **Drones:** speed 6 m/s, usable flight time T\_use = 1890 s (battery endurance 2100 s with a reserve σ\_min = 0.1), sensing radius 30 m and a GSM step of 1 s, as in the baseline implementation.
-- **Distances:** shortest flyable distance d\_G only, computed with Dijkstra's algorithm on the 8-connected cell grid. A diagonal step costs √2 times the cell size, and a path may not cut across an NFZ corner. Each depot joins the grid through the border cells nearest to it. In open space a grid path is at most about 8% longer than the true any-angle path, which errs on the safe side for battery thresholds.
+- **Distances:** use clear straight links where possible, and Dijkstra detours on the 8-connected free-cell graph otherwise. A diagonal graph step costs √2 times the cell size. Every physical segment is checked against buffered NFZ interiors. The current implementation permits boundary grazing within 1e-9 m, consistent with nonnegative signed clearance. Depots connect through visible free-cell centres. This differs from forcing all links through only the nearest border cells.
 - **Routes:** the free cells are divided among the depots by d\_G, each part is swept by boustrophedon decomposition split at the NFZ corners, and the ordered cells are dealt round-robin into that depot's routes.
 
-**Map.** Positions are in metres from the south-west corner of the region. Three depots sit at the middle of the west, east and north sides, 40 m outside. The partition of A4 balances the cells, so each depot serves about 277 of the 830 free cells. The two NFZs cover 70 of the 900 cells (7.8%).
+**Map.** Positions are in metres from the south-west corner of the region. Three depots sit opposite the middle of the west, east and north sides, each exactly 500 m outside its nearest boundary point. The partition of A4 assigns 309, 290 and 231 free cells to the west, east and north depots respectively. The two NFZs cover 70 of the 900 cells (7.8%).
 
 | Item | Position | Why there |
 | --- | --- | --- |
-| D\_N | (600, 1240) | Reaches the open side of the L-shape's pocket |
-| D\_W | (−40, 600) | Directly behind the rectangle, so the way east is blocked |
-| D\_E | (1240, 600) | Faces the bar of the L, so pocket cells next to the bar are far to fly |
+| D\_N | (600, 1700) | Reaches the open side of the L-shape's pocket |
+| D\_W | (−500, 600) | Directly behind the rectangle, so the way east is blocked |
+| D\_E | (1700, 600) | Faces the bar of the L, so pocket cells next to the bar are far to fly |
 | NFZ 1, rectangle | x 200–520, y 520–680 (8 × 4 cells, 32 cells) | A convex block in D\_W's path |
 | NFZ 2, L-shape | bar x 960–1040, y 640–1120; arm x 680–960, y 640–720 (38 cells) | A non-convex shape: its pocket (x 680–960, y 720–1120) opens north and west |
+
+The nearest boundary points are (600, 1200), (0, 600) and (1200, 600) for D_N, D_W and D_E respectively. Each depot-to-boundary distance is 500 m. Validate these distances for every generated map as well; randomising internal NFZs does not change the outer boundary.
+
+**Setback consequences.** Ferry paths, endurance, replacement lead times, rotation inventory and service loads must use the 500 m depot positions. The former shared-loop response budget is removed along with that planner. The round-robin controller reports alarm-to-launch latency separately from ferry travel; it does not assert that a spare can be on station within 150 s or 210 s. Previous results and animations from the 40 m layout are historical.
 
 **Runs**
 
 | Run | Depots | NFZs | Event | What it shows |
 | --- | --- | --- | --- | --- |
-| R0 | all three | both | none; the return rule uses straight-line distance | The flaw of B2: drones in the L-shape's pocket that head for D\_E turn back too late, so C2 is expected to fail. R3 is the same run with d\_G. |
-| R1 | each depot alone in turn (D\_W, D\_E, D\_N), with 9 service slots | both | none | The same map and fleet served from one depot. The best of the three is reported, since the map places D\_W behind the rectangle on purpose and D\_W alone would flatter the three-depot result. The slots give it the same total service capacity as three depots, so only the location differs. |
-| R2 | all three | none | none | The gain from three depots with no obstacles. There are 900 free cells, so slightly more cells per drone than in R3. |
-| R3 | all three | both | none | The full proposed approach. This is the main result. |
-| R4 | all three | both | four flying-drone failures at D\_E, at 1800, 2100, 2400 and 2700 s | A8: D\_E's two spares absorb the first two failures, the third (no spare left) triggers the from-scratch rearrangement, and the fourth tests the rearranged cells. |
-| R5 | all three | both | outage of D\_N from 1800 s to the end of the run | A6: the pocket cells are reassigned to other depots over longer detours. D\_N's stored rotation and spare drones are unavailable, and drones airborne with D\_N as their recovery depot land at the nearest other depot. |
-| R6 | all three | both | R4's four failures at D\_E | The shared loop of the proposed revision, with the fleet sized by L / (vΘ): drones used, worst cell age and recovery time against R3 and R4. |
+| R0 | all three | both | none; the return rule uses straight-line distance | The flaw of B2: drones in the L-shape's pocket that head for D\_E turn back too late, so C2 may fail; verify that the chosen return depot actually requires a detour larger than the buffer. R3 is the same run with d\_G. |
+| R1 | each depot alone in turn (D_W, D_E, D_N), with 6 service slots | both | none | Same 120-drone fleet and total service capacity at each candidate single depot. Report all three and select the best by steady coverage, then worst cell age. |
+| R2 | all three | none | none | Effect of removing NFZs; 900 free cells. |
+| R3 | all three | both | none | Primary Choset-plus-round-robin result. |
+| R4 | all three | both | one flying-drone failure served by D_E at 1800 s | Single-failure bridging and spare takeover. |
+| R5 | all three | both | four flying-drone failures served by D_E at 1800, 2100, 2400 and 2700 s | Repeated failures and borrowing spares from another open depot. |
+| R6 | all three | both | outage of D_N from 1800 s to the end | Stored drones are unavailable, incoming returns are redirected, and affected routes are homed at another open depot without changing their waypoint sets. |
 
-R0 against R3 shows the safety gain of flyable distances. R1 against R3 shows the benefit of depot locations, though it also changes how spares are pooled. R2 against R3 shows the effect of the NFZs; R2 watches 900 cells and R3 830, so compare them on worst cell age and the share of time spent ferrying, not on coverage alone.
+R0 against R3 tests sensitivity to the return-distance metric; a violation need not occur on the natural trajectory. R1 against R3 shows the benefit of depot locations, though it also changes how spares are pooled. R2 against R3 shows the effect of the NFZs; R2 watches 900 cells and R3 830, so compare them on worst cell age and the share of time spent ferrying, not on coverage alone.
 
-**Metrics.** Every run reports steady-state coverage over each run's free cells (830, or 900 in R2), overdue cells, the worst cell age (the longest any cell goes unobserved, the figure an operator would contract for), minimum battery margin, the share of flight time spent ferrying, and each depot's peak queue. The event runs add recovery time and spare-launch latency, and R4 adds the number of routes changed by the rearrangement. The pass condition is that clauses C2, C5, C6 and C8 are never violated in any run; C1, C3 and C4 are reported. Each run lasts 4800 s and steady-state values are averaged over t > 1200 s, as in the baseline implementation. The simulation is deterministic, so one run per setting suffices. Determinism does not remove the dependence on one hand-placed map, so R2 to R4 are also repeated on 20 maps with randomly placed NFZs covering about 8% of the cells.
+**Metrics.** Every run reports steady-state coverage over each run's free cells (830, or 900 in R2), overdue cells, the worst cell age (the longest any cell goes unobserved, the figure an operator would contract for), minimum battery margin, the share of flight time spent ferrying, and each depot's peak queue. The event runs add recovery time and spare-launch latency, and R6 adds the number of routes rehomed after closure. The pass condition is that clauses C2, C5, C6 and C8 are never violated in any run; C1, C3 and C4 are reported. Each run lasts 4800 s and steady-state values are averaged over t > 1200 s, as in the baseline implementation. The unchanged controls are deterministic, so repeating an identical setting provides no independent evidence. A future stochastic planner would require multiple movement seeds per setting. Determinism does not remove the dependence on one hand-placed map, so R3 is also repeated on 20 maps with randomly placed NFZs covering about 8% of the cells.
 
-## Proposed revision of the heuristics
+## Implemented path planner and simulation review
 
-Two changes would make the design easier to explain, cheaper to run and simpler to guarantee: evenly phased returns, and one shared patrol loop instead of round-robin routes. The problem, the depots, the NFZs and the STL clauses stay as they are.
+The only supported path-planning mode is `round_robin`: [Choset and Pignon's boustrophedon decomposition](https://publications.ri.cmu.edu/coverage-path-planning-the-boustrophedon-decomposition), followed by round-robin waypoint assignment within depot sectors. The previous shared-loop algorithm, its fleet-sizing rule and its re-spacing controller have been removed.
 
-### Evenly phased returns
+### Decompose, sweep, then assign round-robin
 
-Batch launches make batteries run down together, so drones return in clusters and the rotation pool needs about twice its Little's-law size (A8). Cutting the first sortie of the i-th drone at each depot short, to i / n\_fly,m of a full sortie, spreads every later return evenly over the cycle. The Little's-law floor of A2 is then close to sufficient: 5 to 6 rotation drones per depot in the experiments instead of 9. The cost is a few extra swaps in the first cycle.
+1. Compute free cells and nearest-flyable-depot sectors (A4).
+2. Sweep each sector upwards through horizontal free intervals. Continue a decomposition region only when one interval overlaps exactly one interval in the next row and vice versa. End and create regions at births, deaths, splits and merges. Record their adjacency graph. This is a raster implementation of Choset's connectivity-event construction; it is not an exact continuous-polygon decomposition for arbitrary geometry.
+3. Traverse the region graph in deterministic depth-first order, starting a new traversal for any disconnected component. Sweep each decomposition region back and forth. Every required free cell appears exactly once in the resulting order.
+4. Deal ordered cells cyclically to the sector's routes. Replacements inherit a route. All travel between waypoints and depots uses the existing NFZ-safe path planner; straight-line links are used only where they are clear. The R0 control changes the battery-return distance estimate, not the physical collision-free paths.
+5. Check endurance before launch, stagger departures independently at each depot, monitor battery reserve throughout flight, and launch rotation/spare drones in response to alarms. Failure bridging uses flyable insertion costs. Depot closure rehomes affected routes and redirects returning drones.
 
-### One shared patrol loop
+This primary method deliberately uses multiple interleaved routes. It does not maintain one shared loop, global spacing or a cyclic revisit-time formula. A cell's freshness depends on the realised routes, departures, footprint observations and handovers; the simulations report these outcomes.
 
-Build one closed sweep through every free cell, of length L: the Choset strips of B3, joined into a single tour by d\_G links. All n\_fly drones fly it in one direction at speed v, spaced L / n\_fly apart. Every cell is then revisited every L / (n\_fly v) seconds, so n\_fly = ⌈L / (vΘ)⌉ keeps every cell fresh. This is the multi-agent cyclic strategy of [Chevaleyre (2004)](https://www.cs.utexas.edu/~pstone/Courses/393Rfall18/readings/Chevaleyre.pdf); in [Elmaliach, Agmon & Kaminka (ICRA 2007)](https://u.cs.biu.ac.il/~kaminkg/publications/b2hd-icra07yehuda.html) evenly spaced robots on one cycle cover "each point in the target area ... at the same optimal frequency".
+### Randomness remains an optional extension
 
-1. Handover. The replacement launches from the depot nearest by d\_G to where the incumbent will be, meets it there and takes its slot, as in A5.
-2. Failure. The drones ahead of the gap slow down until the spacing is even at L / (n\_fly − 1). The worst cell age becomes L / ((n\_fly − 1) v) until a spare fills the slot. No route repair (Stage 5) and no rearrangement (A8) is needed.
-3. Depots. Any depot can feed any slot, so a depot outage (A6) only lengthens some ferries.
+The selected planner is deterministic. Round-robin alone does not make movements random. If randomness is required later, vary admitted sweep entry choices, choose among NFZ-safe equal-cost connectors, or randomly permute recipients within each complete round of waypoint assignments. Merely relabelling routes does not change flight paths. Reject candidates that break endurance, return feasibility or the configured freshness budget, and use staged handovers for route changes.
 
-On the paper's 144-cell grid the loop is 144 × 40 m = 5760 m, so 6 drones at 6 m/s revisit every cell every 160 s, inside Θ = 180 s. The paper flies 16, and this repository's reimplementation reaches 88.2% steady-state coverage with them. On the experiment map the loop is at least 830 × 40 m = 33.2 km, so 31 to 33 flying drones, depending on detours, would keep every cell fresh, against 87 in the current plan. The fleet-size bound in "How the two extensions interact" then becomes a sizing rule instead of a loose lower bound.
+Evaluate such a future policy with separate map and movement seeds, repeated trials per fixed map, and the same fleet and service capacities. Report predictability together with worst cell age, battery margins, queue peaks and failure recovery. Random obstacle layouts in the present campaign test map dependence; they do not randomise motion on a fixed map.
 
-|  | Round-robin per sector (current plan) | Shared loop |
-| --- | --- | --- |
-| Flying drones, experiment map | 87 | 31 to 33 (estimate) |
-| What is guaranteed | a coverage percentage, measured in simulation | worst cell age L / (n\_fly v), a formula |
-| One drone fails | local repair (Stage 5), then a spare | drones re-space; worst age L / ((n\_fly − 1) v) |
-| Spares run out | from-scratch rearrangement (A8) | re-space again, no rebuild |
-| Depot outage | routes reassigned (A6) | other depots feed the loop |
-| Flight paths | routes criss-cross each sector | one direction, fixed spacing, no crossings |
-| Returns to depots | clustered by batch launches | evenly spaced by construction |
+### Simulation outputs and limits
 
-Trade-offs. A failure opens a gap of 2L / n\_fly, so the cells in it wait up to twice the normal interval once, before the drones re-space. Keeping C1 through that transient takes n\_fly ≥ 2L / (vΘ), 62 on the experiment map and still fewer than 87; otherwise C4 bounds the recovery. Chevaleyre finds cyclic strategies better than partitions except where long "tunnels" separate regions, which NFZs can create. The loop replaces Stage 2 and Stage 5 instead of extending them, so R6 tests it against the current plan.
+Run `python scripts/run_port_study.py --out results/port-choset-round-robin` for R0–R6, including all three R1 locations, and 20 seeded NFZ layouts. The runner writes metrics, events, route assignments and JSON summaries for fixed scenarios, a random-map CSV, summary tables and figures. Run `python scripts/run_scenarios.py` for the five baseline scenarios. Measured results and reproducibility details are recorded in [the port study](port-study.md).
+
+The implementation monitors C2/C5/C6/C7 at sampled times; its combined pass flag excludes freshness, launch latency and recovery. The design report calls NFZ avoidance C8, while the executable monitor labels it C7. Neither a successful startup nor zero NFZ violations establishes uninterrupted coverage. Capacity-weighted sector balancing, spare-exhaustion repartitioning (A8), exact launch-to-on-station guarantees and continuous-time collision separation remain outside the current implementation.
 
 ## Glossary
 

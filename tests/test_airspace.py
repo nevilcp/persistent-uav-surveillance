@@ -1,3 +1,4 @@
+import itertools
 import math
 
 import pytest
@@ -61,7 +62,7 @@ def test_distance_matches_path_length_and_paths_avoid_zones():
         route = AIR.path(p, q)
         assert route[0] == p and route[-1] == q
         assert path_length(route) == pytest.approx(AIR.distance(p, q))
-        assert all(AIR.clear(a, b) for a, b in zip(route, route[1:]))
+        assert all(AIR.clear(a, b) for a, b in itertools.pairwise(route))
         assert all(AIR.signed_distance(pt) >= -1e-6 for pt in route)
 
 

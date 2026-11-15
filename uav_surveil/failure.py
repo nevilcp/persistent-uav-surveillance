@@ -42,6 +42,7 @@ class FailureManager:
         self.t_handover: float | None = None
         self.n_inserts = 0
         self._first_cover: dict[int, float | None] = {}
+        self._insertions: dict[int, set[int]] = {}
 
     def due(self, time: float) -> bool:
         return self._cfg.enabled and self.failed_uav is None and time >= self._cfg.time
@@ -82,6 +83,7 @@ class FailureManager:
                 continue  # left to the contingency UAV
             uav, position = choice
             uav.insert_waypoint(position, cell)
+            self._insertions.setdefault(uav.id, set()).add(cell.index)
             self.n_inserts += 1
             self._events.add(time, "bridge_insert", uav.id, f"cell {cell.index}")
 
@@ -119,8 +121,8 @@ class FailureManager:
         if spare is None or self.t_handover is not None or spare.waypoints_reached < 1:
             return
         for uav in self._uavs:
-            if uav.inserted:
-                uav.remove_inserted_waypoints()
+            if uav.id in self._insertions:
+                uav.remove_inserted_waypoints(self._insertions[uav.id])
         self.t_handover = time
         self._events.add(time, "handover", spare.id, f"route {self.route.id}")
 

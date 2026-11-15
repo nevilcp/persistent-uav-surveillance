@@ -91,3 +91,81 @@ def boustrophedon_order(cells: list[Cell]) -> list[Cell]:
         in_row = sorted((c for c in cells if c.row == row), key=lambda c: c.col)
         ordered.extend(in_row if row % 2 == 0 else reversed(in_row))
     return ordered
+
+
+@dataclass(frozen=True)
+class SweepCell:
+    """A raster boustrophedon region, bounded by sweep split/merge events."""
+
+    index: int
+    cells: tuple[Cell, ...]
+    neighbours: tuple[int, ...]
+
+
+def boustrophedon_decomposition(cells: list[Cell]) -> tuple[SweepCell, ...]:
+    """Choset's connectivity-event decomposition on the free-cell raster.
+
+    Sweep upwards through horizontal free intervals. Continue a region only
+    across a one-to-one overlap; terminate and create regions at splits,
+    merges, births and deaths. Links record the region adjacency graph.
+    """
+    by_row: dict[int, list[Cell]] = {}
+    for cell in cells:
+        by_row.setdefault(cell.row, []).append(cell)
+    regions: list[list[Cell]] = []
+    links: list[set[int]] = []
+    previous: list[tuple[list[Cell], int]] = []
+    last_row = -2
+    for row, row_cells in sorted(by_row.items()):
+        if row != last_row + 1:
+            previous = []
+        intervals: list[list[Cell]] = []
+        for cell in sorted(row_cells, key=lambda c: c.col):
+            if not intervals or cell.col != intervals[-1][-1].col + 1:
+                intervals.append([])
+            intervals[-1].append(cell)
+        parents = [
+            [j for j, (old, _) in enumerate(previous)
+             if old[0].col <= run[-1].col and run[0].col <= old[-1].col]
+            for run in intervals
+        ]
+        children = [sum(j in group for group in parents) for j in range(len(previous))]
+        current = []
+        for run, group in zip(intervals, parents):
+            if len(group) == 1 and children[group[0]] == 1:
+                index = previous[group[0]][1]
+            else:
+                index = len(regions)
+                regions.append([])
+                links.append(set())
+                for parent in group:
+                    other = previous[parent][1]
+                    links[index].add(other)
+                    links[other].add(index)
+            regions[index].extend(run)
+            current.append((run, index))
+        previous, last_row = current, row
+    return tuple(SweepCell(i, tuple(group), tuple(sorted(links[i])))
+                 for i, group in enumerate(regions))
+
+
+def choset_order(cells: list[Cell]) -> list[Cell]:
+    """Exhaust the decomposition graph and sweep each region back and forth.
+
+    Travel between region sweeps (including DFS backtracking) is supplied by
+    the flyable-path planner, not by straight-line waypoint jumps.
+    """
+    regions = boustrophedon_decomposition(cells)
+    seen: set[int] = set()
+    ordered: list[Cell] = []
+    for root in range(len(regions)):
+        stack = [root]
+        while stack:
+            index = stack.pop()
+            if index in seen:
+                continue
+            seen.add(index)
+            region = regions[index]
+            ordered.extend(boustrophedon_order(list(region.cells)))
+            stack.extend(reversed(region.neighbours))
+    return ordered

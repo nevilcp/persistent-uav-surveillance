@@ -1,14 +1,11 @@
 """Persistent and resilient UAV-swarm surveillance simulator."""
 
 from .params import Parameters
-from .patrol import LoopSimulation
 from .simulation import Simulation
 
-__all__ = ["LoopSimulation", "Parameters", "Simulation", "make_simulation"]
+__all__ = ["Parameters", "Simulation", "make_simulation"]
 
 
-def make_simulation(params: Parameters) -> Simulation | LoopSimulation:
-    """Simulation for the patrol mode of ``params``."""
-    if params.patrol.mode == "shared_loop":
-        return LoopSimulation(params)
+def make_simulation(params: Parameters) -> Simulation:
+    """Run Choset decomposition with round-robin route assignment."""
     return Simulation(params)

@@ -196,7 +196,7 @@ class Monitor:
     ) -> dict:
         """Headline statistics and the verdict on every clause.
 
-        ``breakdowns`` are the (time, UAV id) pairs of a shared-loop run.
+        ``breakdowns`` are the injected (time, UAV id) pairs.
         """
         p, dt = self._params, self._params.mission.time_step
         now = self.rows[-1]["time"]

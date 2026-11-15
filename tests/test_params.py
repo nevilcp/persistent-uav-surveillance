@@ -24,7 +24,7 @@ def test_json_lists_become_nested_tuples(tmp_path):
             {
                 "region": {"depots": [[-40, 600], [1240, 600]], "zones": [list(TANK)]},
                 "failure": {"near_depot": 1, "later_times": [1800, 2100]},
-                "patrol": {"mode": "shared_loop"},
+                "patrol": {"mode": "round_robin"},
             }
         )
     )
@@ -33,7 +33,7 @@ def test_json_lists_become_nested_tuples(tmp_path):
     assert params.region.zones == (TANK,)
     assert params.failure.later_times == (1800, 2100)
     assert params.failure.near_depot == 1
-    assert params.patrol.mode == "shared_loop"
+    assert params.patrol.mode == "round_robin"
 
 
 def test_new_defaults_keep_the_paper_behaviour():
@@ -53,8 +53,7 @@ def test_new_defaults_keep_the_paper_behaviour():
         ({"failure": FailureParams(near_depot=1)}, "near_depot"),
         ({"failure": FailureParams(closed_depot=0)}, "at least two bases"),
         ({"patrol": PatrolParams(mode="loop")}, "patrol mode"),
-        ({"patrol": PatrolParams(min_speed_ratio=0.0)}, "min_speed_ratio"),
-        ({"patrol": PatrolParams(response_time=0.0)}, "response_time"),
+        ({"patrol": PatrolParams(mode="shared_loop")}, "shared_loop was removed"),
     ],
 )
 def test_airspace_and_patrol_validation(kwargs, match):

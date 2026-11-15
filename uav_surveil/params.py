@@ -77,15 +77,9 @@ class ScheduleParams:
 
 @dataclass(frozen=True)
 class PatrolParams:
-    """Patrol scheme and the shared-loop controller."""
+    """The supported path planner."""
 
-    mode: str = "round_robin"  # "round_robin" | "shared_loop"
-    failures_absorbed: int = 1  # f, breakdowns the loop fleet tolerates
-    handover_overlap: float = 10.0  # delta, relief waits this long at the meeting (s)
-    response_time: float = 150.0  # T_resp, longest spare response to a loop point (s)
-    respace_gain_time: float = 300.0  # T_gain, time to remove a spacing error (s)
-    min_speed_ratio: float = 0.5  # slowest loop speed as a fraction of v_max
-    rotation_margin: int = 0  # extra rotation UAVs per serving base, absorbs relief queueing
+    mode: str = "round_robin"  # Choset decomposition, then round-robin assignment
 
 
 @dataclass(frozen=True)
@@ -176,18 +170,8 @@ class Parameters:
 
     def _validate_patrol(self) -> None:
         patrol = self.patrol
-        if patrol.mode not in ("round_robin", "shared_loop"):
-            raise ValueError("patrol mode must be 'round_robin' or 'shared_loop'")
-        if patrol.failures_absorbed < 0:
-            raise ValueError("failures_absorbed must be non-negative")
-        if patrol.handover_overlap < 0.0:
-            raise ValueError("handover_overlap must be non-negative")
-        if patrol.response_time <= 0.0:
-            raise ValueError("response_time must be positive")
-        if patrol.respace_gain_time <= 0.0:
-            raise ValueError("respace_gain_time must be positive")
-        if not 0.0 < patrol.min_speed_ratio <= 1.0:
-            raise ValueError("min_speed_ratio must lie in (0, 1]")
+        if patrol.mode != "round_robin":
+            raise ValueError("patrol mode must be 'round_robin' (Choset decomposition); shared_loop was removed")
 
     @classmethod
     def from_json(cls, path: str | Path) -> Parameters:

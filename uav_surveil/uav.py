@@ -16,7 +16,6 @@ class UAVState(Enum):
     READY = "ready"  # parked at the depot with a full battery
     ON_ROUTE = "on_route"  # ferrying to / looping on its route
     RETURNING = "returning"  # flying straight home
-    RELAYING = "relaying"  # shared loop: flying to, or hovering at, a hand-over point
     QUEUED = "queued"  # at a base whose turnaround slots are all busy
     SWAPPING = "swapping"  # depot turnaround of duration tau
     FAILED = "failed"  # down in place; takes no further part
@@ -48,18 +47,10 @@ class UAV:
     replaced: bool = False  # a replacement has been requested this sortie
     swap_remaining: float = 0.0  # turnaround time left (s)
 
-    # shared loop only; a looping UAV is ON_ROUTE with no route
-    arc: float = 0.0  # position along the loop (m)
-    meet_arc: float = 0.0  # loop position of the hand-over this relief flies to
-    meet_ahead: float = 0.0  # loop distance the relieved UAV still has to cover
-    relieving: UAV | None = None  # incumbent being relieved; None for a virtual slot
-    left_at: float = 0.0  # time the UAV left the loop
-    cut_after: float | None = None  # staggered first sortie: relief requested after (s)
-
     @property
     def airborne(self) -> bool:
         """Whether the UAV is in the air."""
-        return self.state in (UAVState.ON_ROUTE, UAVState.RETURNING, UAVState.RELAYING)
+        return self.state in (UAVState.ON_ROUTE, UAVState.RETURNING)
 
     def launch(self, route: Route, time: float) -> None:
         """Start flying ``route`` from its first waypoint."""
@@ -100,18 +91,19 @@ class UAV:
             self.target += 1
         self.inserted.add(cell.index)
 
-    def remove_inserted_waypoints(self) -> None:
+    def remove_inserted_waypoints(self, indices: set[int] | None = None) -> None:
         """Restore the original waypoint list, keeping progress."""
         kept: list[Cell] = []
+        remove = self.inserted if indices is None else self.inserted & indices
         removed_before_target = 0
         for i, cell in enumerate(self.waypoints):
-            if cell.index in self.inserted:
+            if cell.index in remove:
                 removed_before_target += i < self.target
             else:
                 kept.append(cell)
         self.target = (self.target - removed_before_target) % max(len(kept), 1)
         self.waypoints = kept
-        self.inserted = set()
+        self.inserted = self.inserted - remove
 
     def fly_leg(self, max_step: float) -> tuple[float, bool]:
         """Advance along the leg; returns distance flown and arrival at its end."""

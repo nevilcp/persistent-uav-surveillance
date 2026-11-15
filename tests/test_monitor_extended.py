@@ -5,13 +5,13 @@ from dataclasses import replace
 
 import pytest
 
-from uav_surveil import LoopSimulation, Parameters, Simulation
+from uav_surveil import Parameters, Simulation
 from uav_surveil.airspace import Airspace
 from uav_surveil.coverage import CoverageMap
 from uav_surveil.depots import Depot
 from uav_surveil.grid import Grid
 from uav_surveil.monitor import COLUMNS, EXTENDED_COLUMNS, Monitor
-from uav_surveil.params import MissionParams, PatrolParams, RegionParams, UAVParams
+from uav_surveil.params import FleetParams, MissionParams, RegionParams, UAVParams
 from uav_surveil.uav import UAV, UAVState
 
 REGION = RegionParams(
@@ -23,7 +23,7 @@ REGION = RegionParams(
 PARAMS = Parameters(
     region=REGION,
     uav=UAVParams(depot_slots=1),
-    patrol=PatrolParams(mode="shared_loop"),
+    fleet=FleetParams(size=120, batch_size=27, reserve_fraction=0.05),
     mission=MissionParams(duration=600.0),
 )
 
@@ -42,8 +42,8 @@ def test_paper_runs_keep_their_columns_and_summary():
     assert "passed" not in summary and "c5_way_home" not in summary
 
 
-def test_a_loop_run_reports_every_extended_clause():
-    sim = LoopSimulation(PARAMS)
+def test_choset_round_robin_reports_every_extended_clause():
+    sim = Simulation(PARAMS)
     summary = sim.run()
     assert set(sim.monitor.rows[0]) == set(EXTENDED_COLUMNS)
     assert summary["c5_way_home"]["violating_steps"] == 0

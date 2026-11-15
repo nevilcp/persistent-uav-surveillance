@@ -6,12 +6,13 @@ import argparse
 import json
 from pathlib import Path
 
-from run_scenarios import SCENARIOS
 from run_port_study import BASE_NAMES, runs, single_base
+from run_scenarios import SCENARIOS
 
 from uav_surveil import Parameters, make_simulation
 from uav_surveil.dispatch import return_threshold
 from uav_surveil.routing import loop_distance
+from uav_surveil.uav import UAVState
 
 ROLLING_WINDOW = 240  # s
 
@@ -29,7 +30,7 @@ def dump(name: str, params: Parameters | None = None) -> dict:
     """Every time step of a scenario run."""
     params = scenario(name) if params is None else params
     sim = make_simulation(params)
-    extended = bool(params.region.depots or params.region.zones or params.patrol.mode == "shared_loop")
+    extended = bool(params.region.depots or params.region.zones)
     theta = params.mission.revisit_threshold
     turnaround = params.uav.turnaround
     cells = sim.airspace.free_cells
@@ -40,6 +41,7 @@ def dump(name: str, params: Parameters | None = None) -> dict:
     steps = round(params.mission.duration / params.mission.time_step)
     for _ in range(steps):
         sim.step()
+        mgr = sim.failure
         t, row = sim.time, sim.monitor.rows[-1]
         if row["battery_margin"] < 0:  # nan compares false
             c2 += 1
@@ -63,6 +65,7 @@ def dump(name: str, params: Parameters | None = None) -> dict:
         )
         if extended:
             frames[-1]["closed_depots"] = [d.index for d in sim.depots if not d.is_open]
+            frames[-1]["failed_uavs"] = [f"{u.id:02d}" for u in sim.uavs if u.state is UAVState.FAILED]
 
     failure = None
     if mgr is not None and mgr.t_fail is not None:
@@ -77,8 +80,8 @@ def dump(name: str, params: Parameters | None = None) -> dict:
             "t_restored": None if rec is None else mgr.t_fail + rec,
         }
 
-    loop = (sim.loop.length if params.patrol.mode == "shared_loop" else
-            max(loop_distance(r.cells, sim.airspace) for r in sim.routes)) / params.uav.speed
+    loop = max(loop_distance(r.cells, sim.airspace) + sim.airspace.distance(r.cells[-1].position, r.cells[0].position)
+               for r in sim.routes) / params.uav.speed
     # the threshold grows with distance; the one at the region edge is the one the hud quotes
     edge = return_threshold(sim.grid.ferry_distance(params.region.depot), params.uav, params.dispatch)
     data = {
@@ -96,13 +99,21 @@ def dump(name: str, params: Parameters | None = None) -> dict:
     }
     if extended:
         bases = params.region.bases
+        edge = return_threshold(max(min(sim.airspace.depot_distance(c.position, m)
+                                        for m in range(len(bases))) for c in cells),
+                                params.uav, params.dispatch)
         pad = params.region.cell_size * 2
         data.update(
             title="Port Surveillance",
             meta=f"{name}  |  {params.patrol.mode.replace('_', ' ').title()}  |  {len(sim.uavs)} UAVs",
             depots=[list(p) for p in bases],
+            return_pct=round(edge * 100),
+            events=[{"t": t, "kind": kind, "uav": uid, "detail": detail}
+                    for t, kind, uid, detail in sim.events.rows if kind in ("failure", "closure")],
             zones=[list(z) for z in params.region.zones],
-            loop_polyline=[list(p) for p in sim.loop.vertices] if params.patrol.mode == "shared_loop" else [],
+            loop_polyline=[],
+            planner="choset_round_robin",
+            routes=[{"id": r.id, "depot": r.depot, "waypoints": [list(p) for p in r.waypoints]} for r in sim.routes],
             extent=[min(0, *(p[0] for p in bases)) - pad,
                     max(params.region.width, *(p[0] for p in bases)) + pad,
                     min(0, *(p[1] for p in bases)) - pad,

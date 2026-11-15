@@ -1,4 +1,9 @@
-# Implementation audit
+# Historical implementation audit
+
+This is the audit of the former shared-loop implementation at the commits named
+below. The current planner is Choset decomposition plus sector-local round-robin;
+the shared-loop module, sizing code and associated tests have been removed. See
+[the current study](port-study.md) and the extension report for the new runs.
 
 Audit of the implemented extension scope on
 `extension/multi-depot-no-fly-zones`, based on baseline commit `8e1c6b6`. Simulation and study code is recorded in
@@ -38,7 +43,7 @@ proof. The figure and media filename changes preserve their binary contents.
   `main`. Baseline verification used an archive of `main`, without switching branches.
 - Full 4800-frame nominal JSON export: byte-identical to `main`.
 - Nominal GIF regenerated with the default GIF command: byte-identical to
-  `assets/nominal-surveillance.gif`.
+  `assets/single_depot/nominal-surveillance.gif`.
 - Full R6 frame export, a post-closure still and a 72-frame full-horizon GIF:
   rendered successfully. Inspection confirmed obstacles, the loop, three depot
   markers and a hollow closed north depot.

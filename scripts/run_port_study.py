@@ -4,26 +4,24 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import json
 import math
+import platform
 import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from uav_surveil import Parameters, make_simulation
-from uav_surveil.airspace import Airspace
 from uav_surveil.fleet import split_fleet
 from uav_surveil.grid import Grid
 from uav_surveil.params import Rect
-from uav_surveil.routing import shared_loop
+from uav_surveil.routing import loop_distance
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT = Parameters.from_json(ROOT / "configs" / "port.json")
 BASE_NAMES = ("west", "east", "north")
 
-# the design doc's predictions for the port, reported next to the simulated values
-DOC_LOOP_KM = 35.0
-DOC_UAVS = 43
-DOC_A1 = 177.0
 
 
 @dataclass
@@ -53,7 +51,10 @@ class Outcome:
         return {
             "uavs": sim.split.total,
             "split": f"{sim.split.n_fly}+{sim.split.n_rotate}+{sim.split.n_spare}",
-            "loop_km": s["loop"]["length_m"] / 1000.0 if "loop" in s else None,
+            "max_route_km": max(
+                loop_distance(r.cells, sim.airspace) + sim.airspace.distance(r.cells[-1].position, r.cells[0].position)
+                for r in sim.routes
+            ) / 1000.0,
             "coverage": s["coverage"]["steady_state_mean_pct"],
             "longest_wait": longest,
             "fresh": longest <= theta,
@@ -86,17 +87,11 @@ def run(name: str, params: Parameters, out: Path | None = None) -> Outcome:
 def single_base(index: int) -> Parameters:
     """The port with one base that has all the service slots of the three."""
     region = replace(PORT.region, depots=(PORT.region.bases[index],))
-    grid = Grid(region)
-    air = Airspace.from_region(grid, region)
-    loop = shared_loop(grid, air)
-    # one base alone cannot meet T_resp, so it gets the response time it can achieve
-    reach = max(air.depot_distance(v, 0) for v in loop.vertices) / PORT.uav.speed
     slots = PORT.uav.depot_slots * len(PORT.region.bases)
     return replace(
         PORT,
         region=region,
         uav=replace(PORT.uav, depot_slots=slots),
-        patrol=replace(PORT.patrol, response_time=math.ceil(reach) + 1.0),
     )
 
 
@@ -116,7 +111,7 @@ def runs() -> dict[str, Parameters]:
         "R0": replace(PORT, dispatch=replace(PORT.dispatch, metric="straight")),
         "R2": replace(PORT, region=replace(PORT.region, zones=())),
         "R3": round_robin(),
-        "R4": PORT,
+        "R4": replace(PORT, failure=replace(failure, enabled=True, time=1800.0, near_depot=1)),
         "R5": replace(
             PORT,
             failure=replace(
@@ -184,13 +179,13 @@ def _connected(blocked: set[int], rows: int, cols: int) -> bool:
 
 
 def run_random_maps(count: int, out: Path) -> list[dict]:
-    """R3 and R4 on ``count`` seeded random maps."""
+    """The primary Choset/round-robin planner on seeded obstacle maps."""
     rows = []
     for seed in range(count):
         zones = random_zones(seed)
         region = replace(PORT.region, zones=zones)
         row = {"seed": seed, "zones": len(zones)}
-        for name, base in (("R3", round_robin()), ("R4", PORT)):
+        for name, base in (("R3", PORT),):
             outcome = run(f"{name}_map{seed:02d}", replace(base, region=region))
             if outcome.error:
                 row |= {f"{name}_error": outcome.error}
@@ -202,9 +197,7 @@ def run_random_maps(count: int, out: Path) -> list[dict]:
                 f"{name}_longest_wait": f["longest_wait"],
                 f"{name}_passed": f["passed"],
             }
-            if name == "R4":
-                row["free_cells"] = len(outcome.sim.airspace.free_cells)
-                row["loop_km"] = round(f["loop_km"], 2)
+            row["free_cells"] = len(outcome.sim.airspace.free_cells)
         rows.append(row)
     keys = sorted({k for r in rows for k in r}, key=lambda k: (k != "seed", k))
     with open(out / "random_maps.csv", "w", newline="") as handle:
@@ -222,7 +215,7 @@ def fmt(value, spec: str = ".1f") -> str:
 def run_table(outcomes: list[Outcome]) -> str:
     """Markdown table of the main runs."""
     header = (
-        "| Run | UAVs (fly+rot+spare) | L (km) | Steady cov. (%) | Longest wait (s) "
+        "| Run | UAVs (fly+rot+spare) | Max route (km) | Steady cov. (%) | Longest wait (s) "
         "| C2 min margin | C3 late / alarms | C5 | C6 | C7 | Transit share | C2, C5-C7 met |\n"
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n"
     )
@@ -233,7 +226,7 @@ def run_table(outcomes: list[Outcome]) -> str:
             continue
         f = o.figures
         lines.append(
-            f"| {o.name} | {f['uavs']} ({f['split']}) | {fmt(f['loop_km'])} "
+            f"| {o.name} | {f['uavs']} ({f['split']}) | {fmt(f['max_route_km'])} "
             f"| {f['coverage']:.1f} | {f['longest_wait']:.0f} | {f['c2_margin']:.3f} "
             f"| {f['c3']} / {f['alarms']} | {f['c5']} | {f['c6']} | {f['c7']} "
             f"| {fmt(f['transit'], '.2f')} | {'yes' if f['passed'] else 'no'} |"
@@ -245,37 +238,11 @@ def run_table(outcomes: list[Outcome]) -> str:
     return header + "\n".join(lines) + "\n" + note
 
 
-def prediction_table(r4: Outcome | None, r5: Outcome | None) -> str:
-    """The doc's predictions next to the simulated values; nothing is asserted."""
-    lines = ["| Quantity | Design doc | Simulated |", "|---|---:|---:|"]
-    if r4 is None or r4.error:
-        return ""
-    f = r4.figures
-    lines.append(f"| Loop length L (km) | {DOC_LOOP_KM:.0f} | {f['loop_km']:.1f} |")
-    lines.append(f"| Total UAVs, shared loop | {DOC_UAVS} | {f['uavs']} |")
-    n_fly = r4.sim.split.n_fly
-    v = r4.params.uav.speed
-    length = f["loop_km"] * 1000.0
-    formula = length / ((n_fly - 1) * v)
-    lines.append(
-        f"| A_1 = L / ((n_fly - 1) v), at the simulated L and n_fly (s) | {DOC_A1:.0f} | {formula:.0f} |"
-    )
-    if r5 is not None and not r5.error:
-        rows = r5.sim.monitor.rows
-        t0 = r5.params.failure.time
-        t1 = r5.params.failure.later_times[0]
-        window = [r["max_age"] for r in rows if t0 <= r["time"] < t1]
-        lines.append(
-            f"| Longest wait after the first breakdown, R5 (s) | {DOC_A1:.0f} | {max(window):.0f} |"
-        )
-    return "\n".join(lines) + "\n"
-
-
 def recovery_table(outcomes: list[Outcome]) -> str:
     """C4 per breakdown and spare-launch latency of R5 and R6."""
     lines = []
     for o in outcomes:
-        if o.error or o.name not in ("R5", "R6"):
+        if o.error or o.name not in ("R4", "R5", "R6"):
             continue
         s = o.summary
         c3 = s["c3_spare_launch"]
@@ -289,7 +256,7 @@ def recovery_table(outcomes: list[Outcome]) -> str:
                 f"{'not reached' if rec is None else f'{rec:.0f} s'} "
                 f"(limit {b['limit_s']:.0f} s, {'met' if b['satisfied'] else 'missed'})"
             )
-        closure = [e for e in o.sim.events.rows if e[1] in ("closure", "resize")]
+        closure = [e for e in o.sim.events.rows if e[1] in ("closure", "reassign")]
         lines.extend(f"- t = {e[0]:.0f} s {e[1]}: {e[3]}" for e in closure)
     return "\n".join(lines) + "\n"
 
@@ -306,14 +273,14 @@ def random_table(rows: list[dict]) -> str:
         )
 
     lines = [
-        f"{len(rows)} maps, zones over about 8% of the cells.\n",
-        "| | R3 round-robin | R4 shared loop |",
-        "|---|---:|---:|",
-        f"| UAVs (min / mean / max) | {stats('R3_uavs')} | {stats('R4_uavs')} |",
-        f"| Steady coverage % (min / mean / max) | {stats('R3_coverage')} | {stats('R4_coverage')} |",
-        f"| Longest wait s (min / mean / max) | {stats('R3_longest_wait')} | {stats('R4_longest_wait')} |",
-        f"| Maps meeting C2, C5-C7 | {sum(bool(r.get('R3_passed')) for r in rows)} | {sum(bool(r.get('R4_passed')) for r in rows)} |",
-        f"| Maps infeasible | {sum('R3_error' in r for r in rows)} | {sum('R4_error' in r for r in rows)} |",
+        f"{len(rows)} maps, movement deterministic; map seeds 0–{len(rows)-1}.\n",
+        "| Metric | Choset + round-robin |",
+        "|---|---:|",
+        f"| UAVs (min / mean / max) | {stats('R3_uavs')} |",
+        f"| Steady coverage % (min / mean / max) | {stats('R3_coverage')} |",
+        f"| Longest wait s (min / mean / max) | {stats('R3_longest_wait')} |",
+        f"| Maps meeting C2, C5-C7 | {sum(bool(r.get('R3_passed')) for r in rows)} |",
+        f"| Maps infeasible | {sum('R3_error' in r for r in rows)} |",
     ]
     return "\n".join(lines) + "\n"
 
@@ -339,16 +306,20 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
         fig, ax = plt.subplots(figsize=(6, 6))
         for x0, y0, x1, y1 in r4.params.region.zones:
             ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, color="0.6"))
-        xs, ys = zip(*r4.sim.loop.vertices)
-        ax.plot([*xs, xs[0]], [*ys, ys[0]], lw=0.4, color="C0")
+        for route in r4.sim.routes:
+            points = []
+            for a, b in zip(route.cells, (*route.cells[1:], route.cells[0])):
+                points.extend(r4.sim.airspace.path(a.position, b.position))
+            xs, ys = zip(*points)
+            ax.plot(xs, ys, lw=0.35, alpha=0.5, color=f"C{route.depot}")
         for k, (x, y) in enumerate(r4.params.region.bases):
             ax.plot(x, y, "k^", ms=9)
             ax.annotate(
                 BASE_NAMES[k], (x, y), textcoords="offset points", xytext=(6, 6)
             )
         ax.set_aspect("equal")
-        ax.set_xlim(-120, 1320)
-        ax.set_ylim(-60, 1320)
+        ax.set_xlim(-600, 1800)
+        ax.set_ylim(-100, 1800)
         fig.tight_layout()
         fig.savefig(out / "port-map.png", dpi=150)
         plt.close(fig)
@@ -367,7 +338,7 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
             )
         theta = PORT.mission.revisit_threshold
         axes[1].axhline(theta, color="grey", ls=":", lw=0.8)
-        axes[1].set_ylim(0, 600)
+        axes[1].set_ylim(bottom=0)
         axes[0].set_ylabel("coverage (%)")
         axes[1].set_ylabel("longest wait (s)")
         axes[1].set_xlabel("time (s)")
@@ -391,7 +362,7 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
                 marks.append(failure.closure_time)
             for m in marks:
                 ax.axvline(m, color="k", ls="--", lw=0.8)
-            ax.set_ylim(0, 600)
+            ax.set_ylim(bottom=0)
             ax.set_ylabel(f"{name} longest wait (s)")
         axes[-1, 0].set_xlabel("time (s)")
         fig.tight_layout()
@@ -401,7 +372,7 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
     if random_rows:
         seeds = [r["seed"] for r in random_rows]
         fig, axes = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
-        for name in ("R3", "R4"):
+        for name in ("R3",):
             axes[0].plot(
                 seeds,
                 [r.get(f"{name}_coverage", math.nan) for r in random_rows],
@@ -445,6 +416,21 @@ def main() -> None:
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
+    sources = [
+        *(ROOT / "uav_surveil").glob("*.py"),
+        Path(__file__),
+        ROOT / "configs" / "port.json",
+    ]
+    manifest = {
+        "python": platform.python_version(),
+        "planner": "choset_round_robin",
+        "depot_setback_m": 500,
+        "source_sha256": {
+            str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(sources)
+        },
+    }
+    (args.out / "reproducibility.json").write_text(json.dumps(manifest, indent=2) + "\n")
     wanted = set(args.only.split(",")) if args.only else None
     chosen = {n: p for n, p in runs().items() if wanted is None or n in wanted}
     outcomes: dict[str, Outcome] = {}
@@ -468,10 +454,19 @@ def main() -> None:
     table = run_table(ordered)
     if best is not None:
         table += f"\nBest single base (R1): {best.name.removeprefix('R1_')}.\n"
-    sections = ["# Port study\n", table]
-    predictions = prediction_table(outcomes.get("R4"), outcomes.get("R5"))
-    if predictions:
-        sections += ["\n## Design doc predictions\n", predictions]
+    sections = [
+        "# Port study: Choset decomposition + round-robin\n",
+        (
+            "All runs use the new planner, 120 UAVs (87 flying, 27 rotation, 6 spare), "
+            "500 m depot setbacks, two service slots per depot (six for single-base runs), "
+            "4800 s duration and a 1 s step. Steady state is t > 1200 s. "
+            "R0 changes the return metric to straight distance; R1 uses each depot alone; "
+            "R2 removes NFZs; R3 is nominal; R4 adds one failure; R5 adds four failures; "
+            "R6 closes the north depot. The reported pass flag covers sampled C2/C5/C6/C7 "
+            "only; freshness, launch latency and recovery are reported separately.\n"
+        ),
+        table,
+    ]
     recoveries = recovery_table(ordered)
     if recoveries.strip():
         sections += ["\n## Breakdown and closure\n", recoveries]

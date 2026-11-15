@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import math
-from bisect import bisect_right
+import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from .airspace import Airspace
+from .fleet import apportion
 from .geometry import path_length
-from .grid import Cell, Grid, boustrophedon_order
+from .grid import Cell, Grid, choset_order
 from .params import Point, UAVParams
 
 
@@ -30,79 +30,34 @@ class Route:
 def round_robin_routes(
     grid: Grid, n_fly: int, cells: Sequence[Cell] | None = None
 ) -> list[Route]:
-    """Round-robin assignment along the boustrophedon order of ``cells``."""
-    ordered = boustrophedon_order(list(grid.cells if cells is None else cells))
+    """Round-robin assignment along Choset decomposition sweeps of ``cells``."""
+    selected = list(grid.cells if cells is None else cells)
+    if not 1 <= n_fly <= len(selected):
+        raise ValueError("route count must be between one and the number of free cells")
+    ordered = choset_order(selected)
     return [Route(id=u + 1, cells=tuple(ordered[u::n_fly])) for u in range(n_fly)]
 
 
-@dataclass(frozen=True)
-class Loop:
-    """Closed patrol loop through every free cell, with arc-length bookkeeping."""
+def depot_round_robin_routes(grid: Grid, n_fly: int, airspace: Airspace) -> list[Route]:
+    """Choset sweeps and round-robin within nearest-flyable-depot sectors.
 
-    vertices: tuple[Point, ...]  # closed polyline corners, detour points included
-    arcs: tuple[float, ...]  # arc length at each vertex, starting at 0
-    length: float  # L, including the closing segment
-    cells: tuple[Cell, ...]  # free cells in loop order
-    cell_arcs: tuple[float, ...]  # arc length at each of those cells
-
-    def point_at(self, s: float) -> Point:
-        """Position at arc length ``s`` (wraps around the loop)."""
-        s %= self.length
-        i = bisect_right(self.arcs, s) - 1
-        end = self.arcs[i + 1] if i + 1 < len(self.arcs) else self.length
-        x0, y0 = self.vertices[i]
-        x1, y1 = self.vertices[(i + 1) % len(self.vertices)]
-        t = (s - self.arcs[i]) / (end - self.arcs[i])
-        return (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
-
-    def cells_near(self, s: float, radius: float) -> list[Cell]:
-        """Free cells whose loop position is within ``radius`` of arc length ``s``."""
-        s %= self.length
-        return [
-            cell
-            for cell, arc in zip(self.cells, self.cell_arcs)
-            if min(abs(arc - s), self.length - abs(arc - s)) <= radius
-        ]
-
-
-def shared_loop(grid: Grid, airspace: Airspace) -> Loop:
-    """Closed boustrophedon over the free cells; zone cells are flown round."""
-    order = [
-        grid.cells[row * grid.n_cols + col]
-        for row, col in _cycle(grid.n_rows, grid.n_cols)
-        if airspace.free_index.get(row * grid.n_cols + col) is not None
-    ]
-    vertices: list[Point] = []
-    cell_vertex: list[int] = []
-    for cell, following in zip(order, order[1:] + order[:1]):
-        cell_vertex.append(len(vertices))
-        vertices.append(cell.position)
-        vertices.extend(airspace.path(cell.position, following.position)[1:-1])
-    arcs = [0.0]
-    for a, b in zip(vertices, vertices[1:]):
-        arcs.append(arcs[-1] + math.dist(a, b))
-    length = arcs[-1] + math.dist(vertices[-1], vertices[0])
-    return Loop(
-        tuple(vertices),
-        tuple(arcs),
-        length,
-        tuple(order),
-        tuple(arcs[i] for i in cell_vertex),
-    )
-
-
-def _cycle(n_rows: int, n_cols: int) -> list[tuple[int, int]]:
-    """Hamiltonian cycle of a grid with an even side: rows, then back along column 0."""
-    if n_rows % 2 == 0:
-        cycle = []
-        for row in range(n_rows):
-            cols = range(1, n_cols) if row % 2 == 0 else range(n_cols - 1, 0, -1)
-            cycle.extend((row, col) for col in cols)
-        cycle.extend((row, 0) for row in range(n_rows - 1, -1, -1))
-        return cycle
-    if n_cols % 2 == 0:
-        return [(row, col) for col, row in _cycle(n_cols, n_rows)]
-    raise ValueError("a closed loop needs an even number of rows or columns")
+    Flyers follow free-cell counts, with at least one per occupied sector.
+    Equal inventories and balanced sectors are not assumed. Connector paths
+    may leave a sector to avoid an NFZ.
+    """
+    sectors: list[list[Cell]] = [[] for _ in airspace.depots]
+    for cell in airspace.free_cells:
+        sectors[airspace.nearest_depot(cell.position)].append(cell)
+    active = [m for m, cells in enumerate(sectors) if cells]
+    if not len(active) <= n_fly <= len(airspace.free_cells):
+        raise ValueError("need at least one flyer per occupied sector and at most one per free cell")
+    extras = (apportion(n_fly - len(active), [len(sectors[m]) - 1 for m in active])
+              if n_fly > len(active) else [0] * len(active))
+    routes = []
+    for m, extra in zip(active, extras):
+        for route in round_robin_routes(grid, 1 + extra, sectors[m]):
+            routes.append(replace(route, id=len(routes) + 1, depot=m))
+    return routes
 
 
 def loop_distance(
@@ -112,7 +67,7 @@ def loop_distance(
     points = [c.position for c in cells]
     if airspace is None:
         return path_length(points)
-    return sum(airspace.distance(a, b) for a, b in zip(points, points[1:]))
+    return sum(airspace.distance(a, b) for a, b in itertools.pairwise(points))
 
 
 def airborne_time(

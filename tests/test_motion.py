@@ -12,7 +12,7 @@ from uav_surveil.params import (
     RegionParams,
 )
 from uav_surveil.simulation import Simulation
-from uav_surveil.uav import UAV, UAVState
+from uav_surveil.uav import UAV
 
 WALL = (-300.0, -100.0, -200.0, 100.0)  # hides the cells nearest the depot
 NOMINAL = Parameters()
