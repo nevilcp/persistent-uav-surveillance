@@ -7,21 +7,32 @@ import json
 from pathlib import Path
 
 from run_scenarios import SCENARIOS
+from run_port_study import BASE_NAMES, runs, single_base
 
-from uav_surveil import Simulation
+from uav_surveil import Parameters, make_simulation
 from uav_surveil.dispatch import return_threshold
 from uav_surveil.routing import loop_distance
 
 ROLLING_WINDOW = 240  # s
 
 
-def dump(name: str) -> dict:
+def scenario(name: str) -> Parameters:
+    """Parameters from the baseline or port study."""
+    if name in SCENARIOS:
+        return SCENARIOS[name]
+    if name.startswith("R1_"):
+        return single_base(BASE_NAMES.index(name[3:]))
+    return runs()[name]
+
+
+def dump(name: str, params: Parameters | None = None) -> dict:
     """Every time step of a scenario run."""
-    params = SCENARIOS[name]
-    sim = Simulation(params)
+    params = scenario(name) if params is None else params
+    sim = make_simulation(params)
+    extended = bool(params.region.depots or params.region.zones or params.patrol.mode == "shared_loop")
     theta = params.mission.revisit_threshold
     turnaround = params.uav.turnaround
-    cells = sim.grid.cells
+    cells = sim.airspace.free_cells
     mgr = sim.failure
     t_launch = None
     c2 = 0
@@ -39,7 +50,7 @@ def dump(name: str) -> dict:
         frames.append(
             {
                 "t": t,
-                "fresh": [round(1 - min(sim.coverage.age(i, t) / theta, 1.0), 3) for i in range(len(cells))],
+                "fresh": [round(1 - min(sim.coverage.age(c.index, t) / theta, 1.0), 3) for c in cells],
                 "uavs": [[f"{u.id:02d}", round(u.position[0], 1), round(u.position[1], 1), round(u.battery, 3)] for u in sim.uavs],
                 "active": int(row["n_on_route"]),
                 "spare": int(row["n_spare_ready"]),
@@ -50,6 +61,8 @@ def dump(name: str) -> dict:
                 "roll": sum(recent) / len(recent),
             }
         )
+        if extended:
+            frames[-1]["closed_depots"] = [d.index for d in sim.depots if not d.is_open]
 
     failure = None
     if mgr is not None and mgr.t_fail is not None:
@@ -64,10 +77,11 @@ def dump(name: str) -> dict:
             "t_restored": None if rec is None else mgr.t_fail + rec,
         }
 
-    loop = max(loop_distance(r.cells) for r in sim.routes) / params.uav.speed
+    loop = (sim.loop.length if params.patrol.mode == "shared_loop" else
+            max(loop_distance(r.cells, sim.airspace) for r in sim.routes)) / params.uav.speed
     # the threshold grows with distance; the one at the region edge is the one the hud quotes
     edge = return_threshold(sim.grid.ferry_distance(params.region.depot), params.uav, params.dispatch)
-    return {
+    data = {
         "name": name,
         "title": "Continuous Patrol",
         "meta": f"Baseline  |  Algorithm: Round-Robin  |  Fleet: {params.fleet.size} UAVs",
@@ -80,12 +94,27 @@ def dump(name: str) -> dict:
         "failure": failure,
         "frames": frames,
     }
+    if extended:
+        bases = params.region.bases
+        pad = params.region.cell_size * 2
+        data.update(
+            title="Port Surveillance",
+            meta=f"{name}  |  {params.patrol.mode.replace('_', ' ').title()}  |  {len(sim.uavs)} UAVs",
+            depots=[list(p) for p in bases],
+            zones=[list(z) for z in params.region.zones],
+            loop_polyline=[list(p) for p in sim.loop.vertices] if params.patrol.mode == "shared_loop" else [],
+            extent=[min(0, *(p[0] for p in bases)) - pad,
+                    max(params.region.width, *(p[0] for p in bases)) + pad,
+                    min(0, *(p[1] for p in bases)) - pad,
+                    max(params.region.length, *(p[1] for p in bases)) + pad],
+        )
+    return data
 
 
 def main() -> None:
     """Command-line entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("scenario", choices=[*SCENARIOS, "all"])
+    parser.add_argument("scenario", choices=[*SCENARIOS, *runs(), *(f"R1_{b}" for b in BASE_NAMES), "all"])
     parser.add_argument("--out", type=Path, default=Path("results/frames"))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)

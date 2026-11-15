@@ -201,6 +201,14 @@ class Run:
         self.has_failure = self.failure is not None
         self.cells = d["cells"]
         self.depot = d["depot"]
+        self.depots = d.get("depots", [self.depot])
+        self.extended = "extent" in d
+        global XLIM, YLIM, SCALE, PLOT_H
+        XLIM, YLIM = (-550.0, 550.0), (-50.0, 550.0)
+        if self.extended:
+            XLIM, YLIM = tuple(d["extent"][:2]), tuple(d["extent"][2:])
+        SCALE = PLOT[2] / (XLIM[1] - XLIM[0])
+        PLOT_H = (YLIM[1] - YLIM[0]) * SCALE
         self.title, self.meta = d["title"], d["meta"]
         half = d["cell_size"] / 2
         self.rects = [
@@ -210,6 +218,8 @@ class Run:
     def at(self, pos):
         """State interpolated at tick position ``pos``."""
         pos = min(max(pos, 0.0), self.n - 1.0)
+        if self.n == 1:
+            return 0, self.fresh[0], self.uav[0]
         i = min(int(pos), self.n - 2)
         f = pos - i
         fresh = self.fresh[i] + (self.fresh[i + 1] - self.fresh[i]) * f
@@ -224,14 +234,17 @@ def canvas_h(run):
     return round(PLOT[1] + PLOT_H + 34 + PAD + (BANNER_H if run.has_failure else 0))
 
 
-def draw_axes(cv):
+def draw_axes(cv, extended=False):
     left, top, w = PLOT
     cv.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(left, top, w, PLOT_H), 8, 8), fill("#fafbfc"))
-    for v in range(-500, 501, 100):
+    step = 200 if extended else 100
+    xs = range(math.ceil(XLIM[0] / step) * step, math.floor(XLIM[1] / step) * step + 1, step) if extended else range(-500, 501, 100)
+    ys = range(math.ceil(YLIM[0] / step) * step, math.floor(YLIM[1] / step) * step + 1, step) if extended else range(0, 501, 100)
+    for v in xs:
         x = px(v, 0)[0]
         cv.drawLine(x, top, x, top + PLOT_H, stroke("#eceef2", 1))
         text(cv, f"{v}".replace("-", "−"), x, top + PLOT_H + 21, "tick", MUTED, "center", tab=True)
-    for v in range(0, 501, 100):
+    for v in ys:
         y = px(0, v)[1]
         cv.drawLine(left, y, left + w, y, stroke("#eceef2", 1))
         text(cv, f"{v}", left - 9, y + 4, "tick", MUTED, "right", tab=True)
@@ -257,13 +270,16 @@ def draw_uav(cv, x, y, soc, uid):
     text(cv, f"{soc * 100:.0f}%", x + 29, y + 24, "chip_soc", MUTED, "right", tab=True)
 
 
-def draw_parked(cv, run, parked):
+def draw_parked(cv, run, parked, base=0):
     """Chip grid of the UAVs parked on the depot, where raw positions coincide."""
-    dy = px(*run.depot)[1]
+    dx, dy = px(*run.depots[base])
     cols, cw, ch = 3, 98, 24
     for k, (uid, soc) in enumerate(parked):
         c, r = k % cols, k // cols
         x, y = PLOT[0] + 10 + c * (cw + 5), dy - 38 - r * (ch + 5) - ch
+        if run.extended:
+            x = min(max(dx - 150, PLOT[0] + 10), PLOT[0] + PLOT[2] - 320) + c * (cw + 5)
+            y = min(max(dy + 32, PLOT[1] + 145), PLOT[1] + PLOT_H - 30 - math.ceil(len(parked) / cols) * (ch + 5)) + r * (ch + 5)
         chip_box(cv, x, y, cw, ch, 7)
         marker(cv, x + 14, y + 12.5, 6, ramp(soc))
         text(cv, uid, x + 28, y + 16.5, "chip_id", INK)
@@ -376,21 +392,36 @@ def draw_frame(cv, run, pos, h):
     tw = text(cv, run.title, PLOT[0], 42, "title", INK)
     text(cv, run.meta, PLOT[0] + tw + 16, 42, "meta", MUTED)
 
-    draw_axes(cv)
+    draw_axes(cv, run.extended)
     for r, v in zip(run.rects, fresh):
         cv.drawRRect(skia.RRect.MakeRectXY(r, 3.5, 3.5), fill(ramp(float(v))))
 
-    dx, dy = px(*run.depot)
-    cv.drawPath(star(dx, dy, 12), fill(DEPOT))
-    text(cv, "Depot", dx, dy - 22, "small", INK, "center")
+    for x0, y0, x1, y1 in run.d.get("zones", []):
+        cv.drawRect(skia.Rect.MakeLTRB(*px(x0, y1), *px(x1, y0)), fill("#9ca3af"))
+    points = run.d.get("loop_polyline", [])
+    if points:
+        path = skia.Path()
+        path.moveTo(*px(*points[0]))
+        for point in points[1:]:
+            path.lineTo(*px(*point))
+        path.close()
+        cv.drawPath(path, stroke("#475569", 1, 90))
+    for base, depot in enumerate(run.depots):
+        dx, dy = px(*depot)
+        closed = base in st.get("closed_depots", [])
+        cv.drawPath(star(dx, dy, 12), stroke(DEPOT, 2) if closed else fill(DEPOT))
+        label = f"D{base + 1}" + (" closed" if closed else "") if run.extended else "Depot"
+        text(cv, label, dx, dy - 22, "small", INK, "center")
 
-    parked, flying = [], []
+    parked, flying = [[] for _ in run.depots], []
     for uid, (x, y, soc) in zip(run.ids, uav):
-        if math.hypot(x - run.depot[0], y - run.depot[1]) < 1.0:
-            parked.append((uid, float(soc)))
+        base = next((m for m, p in enumerate(run.depots) if math.hypot(x - p[0], y - p[1]) < 1.0), None)
+        if base is not None:
+            parked[base].append((uid, float(soc)))
         else:
             flying.append((uid, x, y, float(soc)))
-    draw_parked(cv, run, sorted(parked))
+    for base, group in enumerate(parked):
+        draw_parked(cv, run, sorted(group), base)
     for uid, x, y, soc in sorted(flying, key=lambda u: -u[2]):
         draw_uav(cv, *px(x, y), soc, uid)
 
