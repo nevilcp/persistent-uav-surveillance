@@ -5,15 +5,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .airspace import Airspace
 from .coverage import CoverageMap
+from .depots import Depot, nearest_open_base, reserve_pool
 from .dispatch import must_return, needs_replacement
 from .failure import FailureManager
-from .fleet import FleetSplit, split_fleet
-from .geometry import distance
+from .fleet import FleetSplit, apportion, split_fleet
 from .grid import Grid
 from .monitor import EventLog, Monitor
-from .params import Parameters
-from .routing import Route, check_admissible, ferry_time, round_robin_routes
+from .params import Parameters, Point
+from .routing import (
+    Route,
+    assign_bases,
+    base_ferry_times,
+    check_admissible,
+    round_robin_routes,
+)
 from .schedule import assign_departures
 from .uav import UAV, UAVState
 
@@ -27,43 +34,70 @@ class Simulation:
         self.events = EventLog()
 
         self.grid = Grid(params.region)
-        self.coverage = CoverageMap(len(self.grid.cells))
+        self.airspace = Airspace.from_region(self.grid, params.region)
+        self.depots = [
+            Depot(m, position, params.uav.depot_slots)
+            for m, position in enumerate(self.airspace.depots)
+        ]
+        self.coverage = CoverageMap.of(self.airspace)
         self.split: FleetSplit = split_fleet(params.fleet)
-        self.ferry_time = ferry_time(self.grid, params.region.depot, params.uav)
-        routes = round_robin_routes(self.grid, self.split.n_fly)
-        check_admissible(routes, self.ferry_time, params.uav)
+        self.ferry_times = base_ferry_times(self.grid, self.airspace, params.uav)
+        routes = assign_bases(
+            round_robin_routes(self.grid, self.split.n_fly, self.airspace.free_cells),
+            self.airspace,
+        )
+        zoned = self.airspace if params.region.zones else None
+        for route in routes:
+            check_admissible([route], self.ferry_times[route.depot], params.uav, zoned)
         self.routes: list[Route] = assign_departures(
             routes, params.fleet, params.schedule
         )
-        self.monitor = Monitor(params, self.routes)
+        self.monitor = Monitor(params, self.routes, self.airspace, self.depots)
 
         self.uavs = self._create_fleet()
         self.failure = (
             FailureManager(
-                params, self.uavs, self.coverage, self.ferry_time, self.events
+                params,
+                self.uavs,
+                self.coverage,
+                self.ferry_times,
+                self.events,
+                zoned,
             )
             if params.failure.enabled
             else None
         )
 
+    @property
+    def ferry_time(self) -> float:
+        """Longest one-way ferry time over the bases."""
+        return max(self.ferry_times)
+
     def _create_fleet(self) -> list[UAV]:
-        """All UAVs start at the depot: flyers, then rotation, then spare."""
-        depot, split = self.params.region.depot, self.split
-        uavs = []
-        for i, route in enumerate(self.routes):
-            uavs.append(
-                UAV(id=i + 1, position=depot, route=route, launch_at=route.departure)
+        """Flyers at their route's base; reserves shared out by route count."""
+        depots, split = self.airspace.depots, self.split
+        uavs = [
+            UAV(
+                id=i + 1,
+                position=depots[route.depot],
+                home=route.depot,
+                route=route,
+                launch_at=route.departure,
             )
-        for i in range(split.n_rotate):
-            uavs.append(UAV(id=split.n_fly + i + 1, position=depot))
-        for i in range(split.n_spare):
-            uavs.append(
-                UAV(
-                    id=split.n_fly + split.n_rotate + i + 1,
-                    position=depot,
-                    is_contingency=True,
-                )
-            )
+            for i, route in enumerate(self.routes)
+        ]
+        per_base = [sum(r.depot == m for r in self.routes) for m in range(len(depots))]
+        for count, contingency in ((split.n_rotate, False), (split.n_spare, True)):
+            for base, n in enumerate(apportion(count, per_base)):
+                for _ in range(n):
+                    uavs.append(
+                        UAV(
+                            id=len(uavs) + 1,
+                            position=depots[base],
+                            home=base,
+                            is_contingency=contingency,
+                        )
+                    )
         return uavs
 
     def run(self) -> dict:
@@ -101,11 +135,11 @@ class Simulation:
 
     def _dispatch(self) -> None:
         """Apply the replacement and return-to-base rules."""
-        cfg, depot = self.params, self.params.region.depot
+        cfg = self.params
         for uav in self.uavs:
             if uav.state is not UAVState.ON_ROUTE:
                 continue
-            d = distance(uav.position, depot)
+            base, d = self._nearest_base(uav.position)
             if not uav.replaced and needs_replacement(
                 uav.battery, d, cfg.uav, cfg.dispatch
             ):
@@ -113,14 +147,26 @@ class Simulation:
                 self.monitor.raise_alarm(self.time, uav.route.id, "rotation")
             if must_return(uav.battery, d, cfg.uav, cfg.dispatch):
                 uav.state = UAVState.RETURNING
+                uav.home = base
+                uav.set_leg(
+                    self.airspace.depots[base],
+                    self.airspace.depot_path(uav.position, base)[1:],
+                )
                 self.events.add(
                     self.time, "return", uav.id, f"battery {uav.battery:.3f}"
                 )
 
+    def _nearest_base(self, position: Point) -> tuple[int, float]:
+        """Closest base and the distance the dispatch rules use to it."""
+        return nearest_open_base(
+            self.airspace, self.depots, position, self.params.dispatch.metric
+        )
+
     def _serve_alarms(self) -> None:
         """Launch a reserve UAV for each open alarm, oldest first."""
         for alarm in self.monitor.open_alarms():
-            reserve = self._take_reserve(contingency=alarm.kind == "failure")
+            base = self.routes[alarm.route - 1].depot
+            reserve = self._take_reserve(alarm.kind == "failure", base)
             if reserve is None:
                 continue  # alarm stays open and its latency keeps growing
             reserve.launch(self.routes[alarm.route - 1], self.time)
@@ -131,37 +177,42 @@ class Simulation:
             if alarm.kind == "failure":
                 self.failure.contingency = reserve
 
-    def _take_reserve(self, contingency: bool) -> UAV | None:
-        """Lowest-numbered waiting spare or rotation UAV."""
-        for uav in self.uavs:
-            waiting = uav.state is UAVState.READY and uav.route is None
-            if waiting and uav.is_contingency == contingency:
-                return uav
+    def _take_reserve(self, contingency: bool, base: int) -> UAV | None:
+        """Parked rotation UAV of ``base``, or a spare from the nearest base with one."""
+        order = [base]
+        if contingency:
+            others = [d.index for d in self.depots if d.index != base]
+            depots = self.airspace.depots
+            order += sorted(
+                others, key=lambda m: self.airspace.distance(depots[base], depots[m])
+            )
+        for index in order:
+            pool = reserve_pool(self.uavs, index, contingency)
+            if pool:
+                return pool[0]
         return None
 
     def _move(self, dt: float) -> None:
         params = self.params
-        depot, speed = params.region.depot, params.uav.speed
+        speed = params.uav.speed
+        for depot in self.depots:
+            depot.advance(dt, params.uav.turnaround)
         for uav in self.uavs:
-            if uav.state is UAVState.SWAPPING:
-                uav.swap_remaining -= dt
-                if uav.swap_remaining <= 0.0:
-                    uav.battery = 1.0
-                    uav.state = UAVState.READY
-                    uav.clear_route()
-            elif uav.state is UAVState.ON_ROUTE:
-                waypoint = uav.waypoints[uav.target]
-                flown, arrived = uav.fly_towards(waypoint.position, speed * dt)
+            if uav.state is UAVState.ON_ROUTE:
+                goal = uav.waypoints[uav.target].position
+                if uav.leg_goal != goal:
+                    uav.set_leg(goal, self.airspace.path(uav.position, goal)[1:])
+                flown, arrived = uav.fly_leg(speed * dt)
                 uav.battery -= flown / params.uav.range
                 if arrived:
+                    uav.set_leg(None, [])
                     uav.target = (uav.target + 1) % len(uav.waypoints)
                     uav.waypoints_reached += 1
             elif uav.state is UAVState.RETURNING:
-                flown, arrived = uav.fly_towards(depot, speed * dt)
+                flown, arrived = uav.fly_leg(speed * dt)
                 uav.battery -= flown / params.uav.range
                 if arrived:
-                    uav.state = UAVState.SWAPPING
-                    uav.swap_remaining = params.uav.turnaround
+                    self.depots[uav.home].arrive(uav, params.uav.turnaround)
                     self.events.add(
                         self.time + dt, "arrive", uav.id, f"battery {uav.battery:.3f}"
                     )

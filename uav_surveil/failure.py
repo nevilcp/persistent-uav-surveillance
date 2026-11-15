@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from .airspace import Airspace
 from .coverage import CoverageMap
 from .geometry import distance
 from .grid import Cell
@@ -19,16 +22,18 @@ class FailureManager:
         params: Parameters,
         uavs: list[UAV],
         coverage: CoverageMap,
-        ferry_time: float,
+        ferry_times: Sequence[float],
         events: EventLog,
+        airspace: Airspace | None = None,
     ) -> None:
         self._cfg = params.failure
         self._uav = params.uav
         self._theta = params.mission.revisit_threshold
         self._uavs = uavs
         self._coverage = coverage
-        self._ferry_time = ferry_time
+        self._ferry_times = ferry_times
         self._events = events
+        self._airspace = airspace
 
         self.failed_uav: UAV | None = None
         self.route: Route | None = None
@@ -96,10 +101,11 @@ class FailureManager:
         for uav in self._uavs:
             if not self._is_survivor(uav):
                 continue
-            base = loop_distance(uav.waypoints)
+            base = loop_distance(uav.waypoints, self._airspace)
+            ferry = self._ferry_times[uav.route.depot]
             for position in range(len(uav.waypoints) + 1):
-                extra = _insertion_cost(uav.waypoints, cell, position)
-                new_airborne = 2.0 * self._ferry_time + (base + extra) / self._uav.speed
+                extra = _insertion_cost(uav.waypoints, cell, position, self._airspace)
+                new_airborne = 2.0 * ferry + (base + extra) / self._uav.speed
                 if new_airborne > self._uav.usable_endurance:
                     continue
                 key = (extra, uav.id)
@@ -131,18 +137,24 @@ class FailureManager:
         return max(t - self.t_fail for t in self._first_cover.values())
 
 
-def _insertion_cost(waypoints: list[Cell], cell: Cell, position: int) -> float:
+def _insertion_cost(
+    waypoints: list[Cell],
+    cell: Cell,
+    position: int,
+    airspace: Airspace | None = None,
+) -> float:
     """Loop-distance increase of inserting ``cell`` before ``position``."""
+    measure = airspace.distance if airspace is not None else distance
     before = waypoints[position - 1].position if position > 0 else None
     after = waypoints[position].position if position < len(waypoints) else None
     if before is None and after is None:
         return 0.0
     if before is None:
-        return distance(cell.position, after)
+        return measure(cell.position, after)
     if after is None:
-        return distance(before, cell.position)
+        return measure(before, cell.position)
     return (
-        distance(before, cell.position)
-        + distance(cell.position, after)
-        - distance(before, after)
+        measure(before, cell.position)
+        + measure(cell.position, after)
+        - measure(before, after)
     )

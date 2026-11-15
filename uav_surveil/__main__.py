@@ -7,8 +7,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from . import make_simulation
 from .params import Parameters
-from .simulation import Simulation
 
 
 def override(params: Parameters, assignment: str) -> Parameters:
@@ -62,7 +62,7 @@ def main() -> None:
             failure=replace(params.failure, enabled=True, route=int(route), time=time),
         )
 
-    sim = Simulation(params)
+    sim = make_simulation(params)
     split = sim.split
     print(
         f"fleet split: {split.n_fly} flying + {split.n_rotate} rotation + {split.n_spare} spare"
