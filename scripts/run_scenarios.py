@@ -88,7 +88,7 @@ def plot(sims: dict[str, Simulation], out: Path) -> None:
     axes[1].set_xlabel("time (s)")
     axes[0].legend()
     fig.tight_layout()
-    fig.savefig(out / "coverage_vs_fleet_size.png", dpi=150)
+    fig.savefig(out / "coverage-vs-fleet-size.png", dpi=150)
     plt.close(fig)
 
     t_fail = SCENARIOS["single_failure"].failure.time
@@ -112,7 +112,7 @@ def plot(sims: dict[str, Simulation], out: Path) -> None:
     axes[0].legend()
     axes[2].legend()
     fig.tight_layout()
-    fig.savefig(out / "failure_response.png", dpi=150)
+    fig.savefig(out / "failure-response.png", dpi=150)
     plt.close(fig)
 
     fig, axes = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
@@ -122,7 +122,7 @@ def plot(sims: dict[str, Simulation], out: Path) -> None:
     axes[1].set_ylabel("routes without a UAV")
     axes[1].set_xlabel("time (s)")
     fig.tight_layout()
-    fig.savefig(out / "rotation_pool.png", dpi=150)
+    fig.savefig(out / "rotation-pool.png", dpi=150)
     plt.close(fig)
 
 

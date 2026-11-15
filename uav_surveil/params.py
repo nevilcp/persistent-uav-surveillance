@@ -1,4 +1,4 @@
-"""Simulation parameters; design choices are listed in docs/design_notes.md."""
+"""Simulation parameters; design choices are listed in docs/design-notes.md."""
 
 from __future__ import annotations
 

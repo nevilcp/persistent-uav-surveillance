@@ -350,7 +350,7 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
         ax.set_xlim(-120, 1320)
         ax.set_ylim(-60, 1320)
         fig.tight_layout()
-        fig.savefig(out / "port_map.png", dpi=150)
+        fig.savefig(out / "port-map.png", dpi=150)
         plt.close(fig)
 
     compared = [(n, o) for n in ("R0", "R2", "R3", "R4") if (o := done(n))]
@@ -373,7 +373,7 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
         axes[1].set_xlabel("time (s)")
         axes[0].legend()
         fig.tight_layout()
-        fig.savefig(out / "coverage_by_run.png", dpi=150)
+        fig.savefig(out / "coverage-by-run.png", dpi=150)
         plt.close(fig)
 
     events = [(n, o) for n in ("R5", "R6") if (o := done(n))]
@@ -395,7 +395,7 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
             ax.set_ylabel(f"{name} longest wait (s)")
         axes[-1, 0].set_xlabel("time (s)")
         fig.tight_layout()
-        fig.savefig(out / "breakdown_and_closure.png", dpi=150)
+        fig.savefig(out / "breakdown-and-closure.png", dpi=150)
         plt.close(fig)
 
     if random_rows:
@@ -423,7 +423,7 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
         axes[1].set_xlabel("map seed")
         axes[0].legend()
         fig.tight_layout()
-        fig.savefig(out / "random_maps.png", dpi=150)
+        fig.savefig(out / "random-maps.png", dpi=150)
         plt.close(fig)
 
 

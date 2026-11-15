@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import re
 import subprocess
 import time
 from itertools import pairwise
@@ -494,7 +495,12 @@ def main():
     global LEVELS
     set_palette(a.palette)
     run = Run(a.data)
-    defaults = {"video": Path(f"assets/videos/{a.data.stem}.mp4"), "gif": Path("assets/demo.gif"), "still": Path(f"results/{a.data.stem}.png")}
+    stem = re.sub(r"[^a-z0-9]+", "-", a.data.stem.lower()).strip("-") or "scenario"
+    defaults = {
+        "video": Path(f"assets/videos/{stem}.mp4"),
+        "gif": Path(f"assets/{stem}-surveillance.gif"),
+        "still": Path(f"results/{stem}.png"),
+    }
     out = a.out or defaults[a.mode]
     out.parent.mkdir(parents=True, exist_ok=True)
     if a.mode == "still":
