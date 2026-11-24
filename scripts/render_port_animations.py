@@ -16,15 +16,15 @@ from export_frames import dump
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENES = {
-    "R0": ("straight_return_control", "Return Metric Control", "Straight return metric"),
-    "R1_west": ("single_depot_west", "Single Depot: West", "Choset + Round-Robin"),
-    "R1_east": ("single_depot_east", "Single Depot: East", "Choset + Round-Robin"),
-    "R1_north": ("single_depot_north", "Single Depot: North", "Choset + Round-Robin"),
-    "R2": ("multiple_depots", "Multiple Depots", "No obstacles"),
-    "R3": ("no_fly_zones_choset_round_robin", "No-Fly Zones", "Choset + Round-Robin"),
-    "R4": ("no_fly_zones_single_failure", "Single Failure", "Choset + Round-Robin"),
-    "R5": ("no_fly_zones_repeated_failures", "Repeated Failures", "Choset + Round-Robin"),
-    "R6": ("no_fly_zones_depot_closure", "Depot Closure", "Choset + Round-Robin"),
+    "R0": ("straight_return_control", "Return metric control", "Straight return metric"),
+    "R1_west": ("single_depot_west", "Single depot: west", "Choset + Round-Robin"),
+    "R1_east": ("single_depot_east", "Single depot: east", "Choset + Round-Robin"),
+    "R1_north": ("single_depot_north", "Single depot: north", "Choset + Round-Robin"),
+    "R2": ("multiple_depots", "Multiple depots", "No obstacles"),
+    "R3": ("no_fly_zones_choset_round_robin", "No-fly zones", "Choset + Round-Robin"),
+    "R4": ("no_fly_zones_single_failure", "Single failure", "Choset + Round-Robin"),
+    "R5": ("no_fly_zones_repeated_failures", "Repeated failures", "Choset + Round-Robin"),
+    "R6": ("no_fly_zones_depot_closure", "Depot closure", "Choset + Round-Robin"),
 }
 
 

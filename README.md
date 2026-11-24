@@ -15,11 +15,11 @@ for extended runs.
 <img alt="Animation of the nominal scenario: UAVs patrol the grid and are relieved from the depot as their batteries run down" src="assets/single_depot/nominal-surveillance.gif">
 
 *The nominal scenario (N = 21), the whole 4800 s run. Tiles run from red (overdue) to
-green (just observed); each UAV carries its battery level, and fresh UAVs leave the
-depot as the others run low. The single-failure video adds a violet banner that
-follows the response to a lost UAV.
+green (just observed), and white triangles mark the UAVs in flight. The GIF
+shows the map. Videos show the map alongside the seven STL monitor timelines.
+The single-failure video marks the loss on the shared time axis.
 To render a new preview with the current layout, run `python scripts/export_frames.py nominal` then
-`python scripts/render_animation.py results/frames/nominal.json --mode gif`.*
+`python scripts/render_animation.py results/frames/nominal.json assets/single_depot/nominal-surveillance.gif --mode gif`.*
 
 The primary planner uses Choset boustrophedon decomposition followed by
 round-robin assignment within depot sectors. The shared-loop planner has been removed.
@@ -134,12 +134,11 @@ python scripts/render_port_animations.py all             # nine fixed-scenario M
 ```
 
 The [animation catalogue](assets/README.md) links the multiple-depot and no-fly-zone
-demonstrations, including repeated failures and depot closure. They use the same
-Skia layout, palette, battery labels and coverage display as the baseline. Each
+demonstrations, including repeated failures and depot closure. Each
 MP4 covers all 4800 simulation seconds at 60× speed (about 80 seconds); each GIF condenses the full
-run into a 12-second looping preview. Gray rectangles mark no-fly zones; red stars
-mark depots. Failed UAVs become violet crosses, and event banners identify failures
-and closure. Coverage counts only free cells.
+run into a 12-second looping map preview. Hatched regions mark no-fly zones and
+red stars mark depots. Rust-colored crosses beside a depot mark failed UAVs.
+The video timelines label failures and closures. Coverage counts only free cells.
 
 ![Choset and round-robin patrol with three depots and no-fly zones](assets/multi_depot/no-fly-zones-choset-round-robin-surveillance.gif)
 

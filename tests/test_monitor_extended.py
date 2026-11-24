@@ -113,7 +113,7 @@ def test_c4_per_breakdown_runs_to_the_next_breakdown():
     for t in range(450, 600):
         ages[t] = 300.0
     monitor.rows = [{"time": float(t), "max_age": a} for t, a in ages.items()]
-    first, second = monitor._recoveries([(100.0, 7), (450.0, 9)])
+    first, second = monitor.recoveries([(100.0, 7), (450.0, 9)])
     assert first["recovery_time_s"] == 150.0 and first["satisfied"] is True
     assert second["recovery_time_s"] is None and second["satisfied"] is False
 
@@ -121,7 +121,7 @@ def test_c4_per_breakdown_runs_to_the_next_breakdown():
 def test_c4_is_zero_when_the_slot_is_refilled_before_anything_goes_stale():
     monitor, _, _ = bench()
     monitor.rows = [{"time": float(t), "max_age": 160.0} for t in range(300)]
-    assert monitor._recoveries([(100.0, 7)])[0]["recovery_time_s"] == 0.0
+    assert monitor.recoveries([(100.0, 7)])[0]["recovery_time_s"] == 0.0
 
 
 def test_c4_reports_first_restoration_even_if_coverage_later_drops():
@@ -131,4 +131,4 @@ def test_c4_reports_first_restoration_even_if_coverage_later_drops():
         {"time": 150.0, "max_age": 160.0},
         {"time": 200.0, "max_age": 300.0},
     ]
-    assert monitor._recoveries([(100.0, 7)])[0]['recovery_time_s'] == 50.0
+    assert monitor.recoveries([(100.0, 7)])[0]['recovery_time_s'] == 50.0

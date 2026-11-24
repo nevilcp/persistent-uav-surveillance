@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+from bisect import bisect_left
+from collections import deque
 from pathlib import Path
 
 from run_port_study import BASE_NAMES, runs, single_base
@@ -38,6 +41,8 @@ def dump(name: str, params: Parameters | None = None) -> dict:
     t_launch = None
     c2 = 0
     frames = []
+    departures = sorted(route.departure for route in sim.routes)
+    recent = deque(maxlen=max(1, round(ROLLING_WINDOW / params.mission.time_step)))
     steps = round(params.mission.duration / params.mission.time_step)
     for _ in range(steps):
         sim.step()
@@ -47,8 +52,9 @@ def dump(name: str, params: Parameters | None = None) -> dict:
             c2 += 1
         if t_launch is None and mgr is not None and mgr.contingency is not None:
             t_launch = t
-        recent = [r["coverage_pct"] for r in sim.monitor.rows[-ROLLING_WINDOW:]]
+        recent.append(row["coverage_pct"])
         late = sum(a.latency(t) > turnaround for a in sim.monitor.alarms)
+        margins = row if sim.monitor.extended else sim.monitor.extended_sample(sim.uavs)
         frames.append(
             {
                 "t": t,
@@ -56,15 +62,23 @@ def dump(name: str, params: Parameters | None = None) -> dict:
                 "uavs": [[f"{u.id:02d}", round(u.position[0], 1), round(u.position[1], 1), round(u.battery, 3)] for u in sim.uavs],
                 "active": int(row["n_on_route"]),
                 "spare": int(row["n_spare_ready"]),
+                "routes_due": bisect_left(departures, t),
+                "routes_unstaffed": int(row["n_routes_uncovered"]),
+                "failed": int(row["n_failed"]),
                 "c2": c2,
                 "c3_missed": late,
                 "c3_alarms": len(sim.monitor.alarms),
                 "cov": row["coverage_pct"],
                 "roll": sum(recent) / len(recent),
+                "battery_margin": finite(row["battery_margin"]),
+                "way_home_margin": finite(margins["way_home_margin"]),
+                "queue_margin": finite(-margins["max_base_queue"]),
+                "zone_clearance": finite(margins["zone_clearance"]),
             }
         )
         if extended:
             frames[-1]["closed_depots"] = [d.index for d in sim.depots if not d.is_open]
+        if extended or params.failure.enabled:
             frames[-1]["failed_uavs"] = [f"{u.id:02d}" for u in sim.uavs if u.state is UAVState.FAILED]
 
     failure = None
@@ -82,11 +96,11 @@ def dump(name: str, params: Parameters | None = None) -> dict:
 
     loop = max(loop_distance(r.cells, sim.airspace) + sim.airspace.distance(r.cells[-1].position, r.cells[0].position)
                for r in sim.routes) / params.uav.speed
-    # the threshold grows with distance; the one at the region edge is the one the hud quotes
+    # Use the region-edge threshold as a reference for the scenario caption.
     edge = return_threshold(sim.grid.ferry_distance(params.region.depot), params.uav, params.dispatch)
     data = {
         "name": name,
-        "title": "Continuous Patrol",
+        "title": "Continuous patrol",
         "meta": f"Baseline  |  Algorithm: Round-Robin  |  Fleet: {params.fleet.size} UAVs",
         "cell_size": params.region.cell_size,
         "cells": [list(c.position) for c in cells],
@@ -94,9 +108,19 @@ def dump(name: str, params: Parameters | None = None) -> dict:
         "return_pct": round(edge * 100),
         "loop": round(loop),
         "rolling_window": ROLLING_WINDOW,
+        "monitor_limits": {
+            "freshness": theta,
+            "launch": turnaround,
+            "recovery": theta + params.failure.recovery_tolerance,
+        },
+        "recoveries": sim.monitor.recoveries(sim.breakdowns),
+        "failure_depots": {f"{f.failed_uav.id:02d}": f.failed_uav.home for f in sim.failures},
         "failure": failure,
         "frames": frames,
     }
+    if extended or params.failure.enabled:
+        data["events"] = [{"t": t, "kind": kind, "uav": uid, "detail": detail}
+                          for t, kind, uid, detail in sim.events.rows if kind in ("failure", "closure")]
     if extended:
         bases = params.region.bases
         edge = return_threshold(max(min(sim.airspace.depot_distance(c.position, m)
@@ -104,12 +128,10 @@ def dump(name: str, params: Parameters | None = None) -> dict:
                                 params.uav, params.dispatch)
         pad = params.region.cell_size * 2
         data.update(
-            title="Port Surveillance",
+            title="Port surveillance",
             meta=f"{name}  |  {params.patrol.mode.replace('_', ' ').title()}  |  {len(sim.uavs)} UAVs",
             depots=[list(p) for p in bases],
             return_pct=round(edge * 100),
-            events=[{"t": t, "kind": kind, "uav": uid, "detail": detail}
-                    for t, kind, uid, detail in sim.events.rows if kind in ("failure", "closure")],
             zones=[list(z) for z in params.region.zones],
             loop_polyline=[],
             planner="choset_round_robin",
@@ -120,6 +142,10 @@ def dump(name: str, params: Parameters | None = None) -> dict:
                     max(params.region.length, *(p[1] for p in bases)) + pad],
         )
     return data
+
+
+def finite(value: float) -> float | None:
+    return value if math.isfinite(value) else None
 
 
 def main() -> None:

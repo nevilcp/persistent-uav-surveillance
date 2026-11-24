@@ -25,6 +25,7 @@ assets/single_depot/videos/
 
 # local environment and tool caches
 .env
+/temp/
 .ruff_cache/
 .mypy_cache/
 

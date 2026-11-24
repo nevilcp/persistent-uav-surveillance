@@ -30,19 +30,22 @@ python scripts/render_port_animations.py R3 R6
 python scripts/render_port_animations.py all --mode gif
 ```
 
-MP4s use H.264, 24 fps, 60× simulation speed and the original 1.6× layout
-scale (1920 px wide), giving approximately 80 seconds per video. GIFs use
+Study MP4s use H.264, 24 fps and 60× simulation speed, giving approximately
+80 seconds per video. They show the map and seven STL monitor timelines side by side. GIFs use
 144 frames at 12 fps, 1920 px wide, a stepped 32-level freshness ramp and an
 undithered palette. Both span 1–4800 s; GIFs skip intermediate states and are
 12-second overviews. Videos interpolate movement between 1 Hz samples.
 
-Tiles range from red (overdue) to green (fresh); UAV triangles show battery
-charge. Dark blocks with purple crosses are no-fly zones, red stars are depots, violet crosses are
-failed UAVs, and an outlined depot star indicates closure. Event banners describe
-bridging/spare takeover or depot closure. The displayed return percentage is an
-initial nearest-depot threshold; dispatch uses actual positions and open depots.
-The HUD's “Loop” value is the longest route's nominal cyclic travel time at cruise
-speed; it is not a shared loop or a measured revisit guarantee.
+Tiles range from red (overdue) to green (fresh). White triangles mark UAVs in
+flight, dark hatched blocks mark no-fly zones, and red stars mark depots.
+Rust-colored crosses beside a depot mark failed UAVs, and outlined depot stars
+mark closures. C1 traces instantaneous and rolling coverage. C2–C7 show battery
+reserve, spare launch, recovery, return energy, depot queue margin and no-fly
+zone clearance. Percentage-point margins use `pp`. Labels below the shared video
+time axis mark recorded failures and closures. GIFs show the map alone.
+Both overlays report how many routes due by that time lack an on-route UAV,
+along with ready spare and failed UAV counts. Videos also show the number of
+UAVs on route, and GIFs show the percentage of fresh cells.
 The media show measured behavior, including coverage gaps and queues; they do
 not imply that all monitor clauses passed. See [the results](../docs/port-study.md).
 
@@ -66,13 +69,14 @@ describes the scenarios and formats requested by the latest batch command.
 
 ## Original demonstrations
 
-The original preview is [nominal-surveillance.gif](single_depot/nominal-surveillance.gif).
+The [nominal GIF](single_depot/nominal-surveillance.gif) previews the full run
+in 12 seconds. Baseline MP4s add all seven STL timelines to the compact map.
 Baseline MP4 filenames are `under-provisioned.mp4`, `nominal.mp4`,
 `over-provisioned.mp4`, `long-horizon.mp4` and `single-failure.mp4` under `single_depot/videos/`.
-The baseline GIF uses the current title formatting and borderless canvas. New renders go to `multi_depot/`; for example:
+These commands regenerate the nominal video and GIF at their catalogue paths.
 
 ```bash
 python scripts/export_frames.py nominal
-python scripts/render_animation.py results/frames/nominal.json
-python scripts/render_animation.py results/frames/nominal.json --mode gif
+python scripts/render_animation.py results/frames/nominal.json assets/single_depot/videos/nominal.mp4
+python scripts/render_animation.py results/frames/nominal.json assets/single_depot/nominal-surveillance.gif --mode gif
 ```

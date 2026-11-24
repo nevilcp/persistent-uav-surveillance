@@ -130,11 +130,11 @@ class Monitor:
             "n_routes_uncovered": uncovered,
         }
         if self.extended:
-            row.update(self._extended_row(time, uavs))
+            row.update(self.extended_sample(uavs))
             self._track_load(time, uavs)
         self.rows.append(row)
 
-    def _extended_row(self, time: float, uavs: list[UAV]) -> dict[str, float]:
+    def extended_sample(self, uavs: list[UAV]) -> dict[str, float]:
         """C5, C7 and C6 values of one step; nan where the clause has no subject."""
         air, uav = self._airspace, self._params.uav
         flying = [u for u in uavs if u.airborne]
@@ -248,7 +248,7 @@ class Monitor:
             }
         if self.extended:
             if breakdowns:
-                result["c4_breakdowns"] = self._recoveries(breakdowns)
+                result["c4_breakdowns"] = self.recoveries(breakdowns)
             result.update(self._extended_summary(now))
             result["passed"] = all(
                 result[key]["violating_steps"] == 0
@@ -261,7 +261,7 @@ class Monitor:
             )
         return result
 
-    def _recoveries(self, breakdowns: Sequence[tuple[float, int]]) -> list[dict]:
+    def recoveries(self, breakdowns: Sequence[tuple[float, int]]) -> list[dict]:
         """C4 per breakdown: time until no cell is older than Theta again."""
         p = self._params
         theta = p.mission.revisit_threshold

@@ -6,6 +6,8 @@ import math
 import re
 import subprocess
 import time
+from bisect import bisect_right
+from collections import deque
 from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
@@ -19,11 +21,13 @@ PLOT = (66, 62, 1010)  # left, top, width of the metric plot
 XLIM, YLIM = (-550.0, 550.0), (-50.0, 550.0)
 SCALE = PLOT[2] / (XLIM[1] - XLIM[0])
 PLOT_H = (YLIM[1] - YLIM[0]) * SCALE
-BANNER_H = 46  # only runs with a failure reserve the banner row
-LOST_SHOWN = 20.0  # seconds the first banner message stays up
+MONITOR_W = 1180
+VIDEO_W = W + MONITOR_W
+AXIS_GAP = 9
 SNAP = 25.0  # metres; a larger jump between ticks is a relaunch or swap, not flight
-INK, MUTED, RULE = "#14181f", "#586174", "#e3e6eb"  # muted holds 6:1 on white at the 12 px minimum
+INK, MUTED, RULE = "#14181f", "#465063", "#d6dce4"
 BG, CARD = "#f4f5f7", "#ffffff"
+PLOT_BG, GRID = "#fafbfc", "#e1e6ec"
 FAIL = "#9a3412"
 ZONE = "#1E1B3A"
 ZONE_LINE = "#C4B5FD"
@@ -33,7 +37,7 @@ PALETTES = {  # red -> green as RdYlGn; stops at 0, .25, .5, .75, 1
     "A": ["#b3262d", "#ea6a3c", "#f3d263", "#86c06c", "#1c7c4d"],
     "B": ["#951c2e", "#d0502c", "#dfa52b", "#5b9f55", "#0f6a3d"],
     "C": ["#7f1527", "#be4528", "#cf9a1e", "#4f9150", "#0b5c35"],
-    "D": ["#9b1c31", "#d8502a", "#e8b02d", "#6aab50", "#12703f"],
+    "D": ["#90162b", "#d64823", "#e8b02d", "#63a749", "#0a6539"],
 }
 RAMP = [(i / 4, c) for i, c in enumerate(PALETTES["D"])]
 
@@ -42,11 +46,10 @@ TYPE = {
     "title": (26, 600, "Inter Display"),
     "meta": (15, 400, "Inter"),
     "value": (15, 600, "Inter"),
+    "heading": (15, 700, "Inter"),
     "label": (14, 500, "Inter"),
     "small": (13, 500, "Inter"),
     "tick": (12, 400, "Inter"),
-    "chip_id": (12, 700, "Inter"),
-    "chip_soc": (12, 500, "Inter"),
 }
 
 
@@ -118,7 +121,7 @@ def stroke(c, w, alpha=255):
     p = fill(c, alpha)
     p.setStyle(skia.Paint.kStroke_Style)
     p.setStrokeWidth(w)
-    p.setStrokeJoin(skia.Paint.kRound_Join)
+    p.setStrokeJoin(skia.Paint.kMiter_Join)
     return p
 
 
@@ -153,15 +156,6 @@ def text(cv, s, x, y, style, c=INK, align="left", tab=False):
     return w
 
 
-def card(cv, x, y, w, h, r=16):
-    rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(x, y, w, h), r, r)
-    shadow = fill("#101828", 10)
-    shadow.setMaskFilter(skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, 6))
-    cv.drawRRect(rr.makeOffset(0, 2), shadow)
-    cv.drawRRect(rr, fill(CARD))
-    cv.drawRRect(rr, stroke(RULE, 1))
-
-
 def star(cx, cy, r):
     path = skia.Path()
     for i in range(10):
@@ -185,19 +179,24 @@ def px(x, y):
     return PLOT[0] + (x - XLIM[0]) * SCALE, PLOT[1] + (YLIM[1] - y) * SCALE
 
 
-SLOT_FIELDS = {  # hud fields; digits are tabular so the longest string fixes the width
-    "t": lambda f: f"{f['t']:,.0f} s",
-    "active": lambda f: f"{f['active']}",
-    "spare": lambda f: f"{f['spare']}",
-    "c2": lambda f: f"{f['c2']}",
-    "c3": lambda f: f"{f['c3_missed']}/{f['c3_alarms']}",
-    "cov": lambda f: f"{f['cov']:.1f}%",
-    "roll": lambda f: f"{f['roll']:.1f}%",
+# Normalize titles in older frame exports while preserving casing in custom titles.
+LEGACY_SCENARIO_TITLES = {
+    "Continuous Patrol": "Continuous patrol",
+    "Port Surveillance": "Port surveillance",
+    "Single Depot: West": "Single depot: west",
+    "Single Depot: East": "Single depot: east",
+    "Single Depot: North": "Single depot: north",
+    "No-Fly Zones": "No-fly zones",
+    "Single Failure": "Single failure",
+    "Repeated Failures": "Repeated failures",
+    "Depot Closure": "Depot closure",
+    "Return Metric Control": "Return metric control",
+    "Multiple Depots": "Multiple depots",
 }
 
 
 class Run:
-    def __init__(self, path):
+    def __init__(self, path, *, compact_baseline=False):
         d = json.loads(Path(path).read_text())
         self.d = d
         fr = d["frames"]
@@ -207,32 +206,44 @@ class Run:
         self.ids = [u[0] for u in fr[0]["uavs"]]
         self.uav = np.array([[u[1:] for u in f["uavs"]] for f in fr], dtype=np.float32)  # tick, uav, (x y soc)
         self.fr = fr
-        self.slots = {k: max((fmt(f) for f in fr), key=len) for k, fmt in SLOT_FIELDS.items()}
+        routes = max(frame.get("routes_due") or 0 for frame in fr)
+        self.hud_value_width = max(
+            measure("value", value, tab=True)
+            for value in (format_hud_time(fr[-1]["t"]), f"{routes:,} / {routes:,}", f"{len(self.ids):,}",
+                          "100.0%", "None due")
+        )
         self.failure = d["failure"]
         self.events = d.get("events", [])
-        self.has_failure = self.failure is not None or bool(self.events)
+        if not self.events and self.failure:
+            self.events = [{"kind": "failure", "t": self.failure["t_fail"], "uav": self.failure["uav"]}]
+        self.event_labels = []
+        failure_number = 0
+        for event in sorted(self.events, key=lambda event: event["t"]):
+            if event["kind"] == "failure":
+                failure_number += 1
+                label = f"Failure {failure_number}"
+            elif event["kind"] == "closure":
+                label = f"D{int(event['detail'].split()[-1]) + 1} closure"
+            else:
+                continue
+            self.event_labels.append((event["t"], label))
+        self.failure_times = sorted(event["t"] for event in self.events if event["kind"] == "failure")
         self.cells = d["cells"]
         self.depot = d["depot"]
         self.depots = d.get("depots", [self.depot])
         self.extended = "extent" in d
+        self.compact = compact_baseline and not self.extended
         global XLIM, YLIM, SCALE, PLOT_H
         XLIM, YLIM = (-550.0, 550.0), (-50.0, 550.0)
-        if self.extended:
-            XLIM, YLIM = tuple(d["extent"][:2]), tuple(d["extent"][2:])
-        cx, cy = (XLIM[0] + XLIM[1]) / 2, (YLIM[0] + YLIM[1]) / 2
-        if self.extended:
-            cx, cy = 600, 850
-        XLIM, YLIM = (cx - 1135, cx + 1135), (cy - 895, cy + 895)
+        if not self.compact:
+            cx, cy = (600, 850) if self.extended else (0, 250)
+            XLIM, YLIM = (cx - 1135, cx + 1135), (cy - 895, cy + 895)
         SCALE = PLOT[2] / (XLIM[1] - XLIM[0])
         PLOT_H = (YLIM[1] - YLIM[0]) * SCALE
-        self.title = " ".join(d["title"].split()).title()
-        self.meta = "  |  ".join(
-            " ".join(part.replace("_", " ").split()).title()
-            for part in d["meta"].split("|")
-        )
-        self.meta = re.sub(r"\bUavs\b", "UAVs", self.meta)
-        self.meta = re.sub(r"\bUav\b", "UAV", self.meta)
-        self.meta = re.sub(r"\b1 Depots\b", "1 Depot", self.meta)
+        title = " ".join(d["title"].split())
+        self.title = LEGACY_SCENARIO_TITLES.get(title, title)
+        study_id = re.match(r"R\d+(?=\b|_)", d.get("name") or d.get("meta", ""), re.IGNORECASE)
+        self.study_id = study_id.group().upper() if study_id else ""
         self.zone_path = skia.Path()
         for x0, y0, x1, y1 in d.get("zones", []):
             rect = skia.Path()
@@ -246,6 +257,8 @@ class Run:
         self.rects = [
             skia.Rect.MakeLTRB(*px(x - half, y + half), *px(x + half, y - half)).makeInset(1.3, 1.3) for x, y in self.cells
         ]
+        self.tile_paints = [fill(c) for c in LUT]
+        self.failure_depots = d.get("failure_depots", {})
 
     def at(self, pos):
         """State interpolated at tick position ``pos``."""
@@ -263,91 +276,99 @@ class Run:
 
 
 def canvas_h(run):
-    return round(PLOT[1] + PLOT_H + 55 + PAD + BANNER_H)
+    return round(PLOT[1] + PLOT_H + 48 + PAD)
 
 
-def draw_axes(cv, extended=False):
+def draw_axes(cv, run):
     left, top, w = PLOT
-    cv.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(left, 62, w, PLOT_H + top - 62), 8, 8), fill("#fafbfc"))
-    step = 200 if extended else 100
-    xs = range(math.ceil(XLIM[0] / step) * step, math.floor(XLIM[1] / step) * step + 1, step) if extended else range(-500, 501, 100)
-    ys = range(math.ceil(YLIM[0] / step) * step, math.floor(YLIM[1] / step) * step + 1, step) if extended else range(0, 501, 100)
+    cv.drawRect(skia.Rect.MakeXYWH(left, top, w, PLOT_H), fill(PLOT_BG))
+    step = 200 if run.extended else 100
+    xs = range(math.ceil(XLIM[0] / step) * step, math.floor(XLIM[1] / step) * step + 1, step) if run.extended else range(-500, 501, 100)
+    ys = range(math.ceil(YLIM[0] / step) * step, math.floor(YLIM[1] / step) * step + 1, step) if run.extended else range(0, 501, 100)
     for v in xs:
         x = px(v, 0)[0]
-        cv.drawLine(x, top, x, top + PLOT_H, stroke("#eceef2", 1))
-        text(cv, f"{v}".replace("-", "−"), x, top + PLOT_H + 21, "tick", MUTED, "center", tab=True)
+        cv.drawLine(x, top, x, top + PLOT_H, stroke(GRID, 1))
+        text(cv, f"{v}".replace("-", "−"), x, top + PLOT_H + AXIS_GAP + 9, "tick", MUTED, "center", tab=True)
+    y_tick_width = 0
     for v in ys:
         y = px(0, v)[1]
-        cv.drawLine(left, y, left + w, y, stroke("#eceef2", 1))
-        text(cv, f"{v}", left - 9, y + 4, "tick", MUTED, "right", tab=True)
-    text(cv, "x (m)", left + w / 2, top + PLOT_H + 39, "tick", MUTED, "center")
+        cv.drawLine(left, y, left + w, y, stroke(GRID, 1))
+        width = text(cv, f"{v}".replace("-", "−"), left - AXIS_GAP, y + 4, "tick", MUTED, "right", tab=True)
+        y_tick_width = max(y_tick_width, width)
+    text(cv, "X (m)", left + w / 2, top + PLOT_H + 2 * (AXIS_GAP + 9), "tick", MUTED, "center")
     cv.save()
-    cv.translate(15, top + PLOT_H / 2)
+    cv.translate(left - 2 * AXIS_GAP - y_tick_width, top + PLOT_H / 2)
     cv.rotate(-90)
-    text(cv, "y (m)", 0, 0, "tick", MUTED, "center")
+    text(cv, "Y (m)", 0, 0, "tick", MUTED, "center")
     cv.restore()
 
 
-def marker(cv, x, y, r, soc_color):
-    """UAV triangle with a white halo."""
-    cv.drawPath(triangle(x, y, r), stroke("#ffffff", 3.6))
-    cv.drawPath(triangle(x, y, r), fill(soc_color))
-    cv.drawPath(triangle(x, y, r), stroke(INK, 1.3))
+def marker(cv, x, y):
+    path = triangle(x, y, 5.2)
+    cv.drawPath(path, fill(CARD))
+    cv.drawPath(path, stroke(INK, 1.25))
 
 
-def chip_box(cv, x, y, w, h, r, alpha=240):
-    rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(x, y, w, h), r, r)
-    cv.drawRRect(rr, fill(CARD, alpha))
-    cv.drawRRect(rr, stroke("#c8ced8", 1))
+def chip_box(cv, x, y, w, h, alpha):
+    rect = skia.Rect.MakeXYWH(x, y, w, h)
+    cv.drawRect(rect, fill(CARD, alpha))
+    cv.drawRect(rect, stroke("#b8c1cd", 1))
 
 
-def draw_uav(cv, x, y, soc, uid):
-    marker(cv, x, y, 8, ramp(soc))
-    chip_box(cv, x - 33, y + 11, 66, 18, 5, 240)
-    text(cv, uid, x - 28, y + 24, "chip_id", INK)
-    text(cv, f"{soc * 100:.0f}%", x + 29, y + 24, "chip_soc", MUTED, "right", tab=True)
+def format_hud_time(t):
+    return f"{int(t)} s"
 
 
-def draw_hud(cv, run, st):
-    """Four-line status box inside the plot."""
-    d, sl = run.d, run.slots
-    rows = [  # (label, widest value, value); the widest value keeps the box from shifting
-        [("Time:", sl["t"], f"{st['t']:,.0f} s")],
-        [("Active:", sl["active"], f"{st['active']}"), ("Spare:", sl["spare"], f"{st['spare']}"), ("Return @", f"{d['return_pct']}%", f"{d['return_pct']}%")],
-        [("C2 Viol:", sl["c2"], f"{st['c2']}"), ("C3 Miss:", sl["c3"], f"{st['c3_missed']}/{st['c3_alarms']}"), ("Loop:", f"{d['loop']} s", f"{d['loop']} s")],
-        [("Coverage:", sl["cov"], f"{st['cov']:.1f}%"), (f"Rolling ({d['rolling_window']}s):", sl["roll"], f"{st['roll']:.1f}%")],
-    ]
-    sep, rh, pad = " | ", 25, 14
-    sw = measure("label", sep)
-    widest = max(sum(measure("label", a) + 6 + measure("value", w, True) for a, w, _ in row) + sw * (len(row) - 1) for row in rows)
-    x0, y0 = PLOT[0] + 12, PLOT[1] + 12
-    chip_box(cv, x0, y0, widest + 2 * pad, rh * len(rows) + 14, 9, 246)
-    for r, row in enumerate(rows):
-        y = y0 + 7 + r * rh + 18
-        x = x0 + pad
-        for k, (label, widest_value, value) in enumerate(row):
-            if k:
-                x += text(cv, sep, x, y, "label", "#b4bbc6")
-            lw = text(cv, label, x, y, "label", MUTED)
-            text(cv, value, x + lw + 6, y, "value", INK, tab=True)
-            x += lw + 6 + measure("value", widest_value, True)
+def draw_hud(cv, run, st, *, compact):
+    """Mission state in the current sample, independent of the monitor readouts."""
+    now = st["t"]
+    unstaffed, due = st.get("routes_unstaffed"), st.get("routes_due")
+    if due:
+        gaps = f"{unstaffed:,} / {due:,}" if unstaffed is not None else "—"
+    else:
+        gaps = "None due" if due == 0 else "—"
+    failed = st.get("failed")
+    if failed is None:
+        failed = len(st["failed_uavs"]) if "failed_uavs" in st else bisect_right(run.failure_times, now)
+
+    route_status = ("Unserved", gaps, FAIL if unstaffed else INK)
+    ready_spares = ("Reserves", f"{st['spare']:,}", INK)
+    failed_uavs = ("Losses", f"{failed:,}", INK)
+    if compact:
+        metrics = [route_status, ready_spares, failed_uavs, ("Coverage", f"{st['cov']:.1f}%", INK)]
+    else:
+        metrics = [route_status, ("Patrolling", f"{st['active']:,}", INK), ready_spares, failed_uavs]
+
+    metrics.insert(0, ("Time", format_hud_time(now), INK))
+    x, y = PLOT[0] + 12, PLOT[1] + 12
+    pad, row_height = 12, 22
+    label_width = max(measure("label", label + ": ") for label, _, _ in metrics)
+    width = label_width + run.hud_value_width + 2 * pad
+    box = skia.Rect.MakeXYWH(x, y, width, len(metrics) * row_height + 2 * pad)
+    cv.drawRoundRect(box, 4, 4, fill(CARD))
+    cv.drawRoundRect(box, 4, 4, stroke(RULE, 1))
+    for row, (label, value, ink) in enumerate(metrics):
+        baseline = y + pad + 15 + row * row_height
+        text(cv, label + ": ", x + pad, baseline, "label", MUTED)
+        text(cv, value, box.right() - pad, baseline, "value", ink, "right", tab=True)
 
 
 def draw_legend(cv, zones=False):
     x1 = PLOT[0] + PLOT[2] - 12
     y = PLOT[1] + 12
-    w = 24 + measure("label", "Depot") + 26 + 26 + measure("label", "UAVs") + 14
+    uav_label_width = measure("label", "UAVs")  # Preserve the existing legend spacing.
+    w = 24 + measure("label", "Depot") + 26 + 26 + uav_label_width + 14
     if zones:
         w += 38 + measure("label", "No-fly zone")
-    chip_box(cv, x1 - w, y, w, 32, 9, 246)
+    chip_box(cv, x1 - w, y, w, 32, 246)
     x = x1 - w + 14
     cv.drawPath(star(x + 7, y + 16, 8), fill(DEPOT))
     x += 22
     x += text(cv, "Depot", x, y + 21, "label", INK) + 22
-    marker(cv, x + 7, y + 16.5, 7, "#cbd2dc")
-    text(cv, "UAVs", x + 22, y + 21, "label", INK)
+    marker(cv, x + 7, y + 16.5)
+    text(cv, "UAV", x + 22, y + 21, "label", INK)
     if zones:
-        x += 22 + measure("label", "UAVs") + 18
+        x += 22 + uav_label_width + 18
         box = skia.Rect.MakeXYWH(x, y + 10, 13, 13)
         cv.drawRect(box, fill(ZONE, 224))
         cv.save()
@@ -364,10 +385,10 @@ def draw_legend(cv, zones=False):
 def draw_colorbar(cv):
     x = PLOT[0] + PLOT[2] + 20
     y, h = PLOT[1], PLOT_H
-    bar = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(x, y, 14, h), 7, 7)
+    bar = skia.Rect.MakeXYWH(x, y, 14, h)
     if LEVELS:
         cv.save()
-        cv.clipRRect(bar, doAntiAlias=True)
+        cv.clipRect(bar)
         for k in range(LEVELS):
             cv.drawRect(skia.Rect.MakeXYWH(x, y + h * (1 - (k + 1) / LEVELS) - 0.5, 14, h / LEVELS + 1), fill(ramp(k / (LEVELS - 1))))
         cv.restore()
@@ -375,71 +396,348 @@ def draw_colorbar(cv):
         shader = skia.GradientShader.MakeLinear(
             [(0, y), (0, y + h)], [skia.Color(*hexrgb(c), 255) for _, c in reversed(RAMP)], [1 - p for p, _ in reversed(RAMP)]
         )
-        cv.drawRRect(bar, skia.Paint(AntiAlias=True, Shader=shader))
+        cv.drawRect(bar, skia.Paint(AntiAlias=True, Shader=shader))
     for k in range(6):
         v = k / 5
-        text(cv, f"{v:.1f}", x + 24, y + h * (1 - v) + 4, "tick", MUTED, tab=True)
+        text(cv, f"{v:.0%}", x + 24, y + h * (1 - v) + 4, "tick", MUTED, tab=True)
     cv.save()
     cv.translate(x + 70, y + h / 2)
     cv.rotate(-90)
-    text(cv, "UAV SoC / Cell Freshness", 0, 0, "small", MUTED, "center")
+    text(cv, "Cell freshness", 0, 0, "small", MUTED, "center")
     cv.restore()
 
 
-def banner_text(f, t):
-    """Status line of the failure response at time ``t``; None before the failure."""
-    if t < f["t_fail"]:
-        return None
-    route = f["route"]
-    if t < f["t_fail"] + LOST_SHOWN:
-        return f"UAV {f['uav']} was lost at {f['t_fail']:,.0f} seconds."
-    if f["t_handover"] is not None and t >= f["t_handover"]:
-        if f["t_restored"] is not None and t >= f["t_restored"]:
-            return "Recovery is complete and coverage is restored."
-        return f"Spare UAV {f['spare']} is covering route {route}."
-    if f["t_launch"] is not None and t >= f["t_launch"]:
-        return f"Spare UAV {f['spare']} is flying to route {route}."
-    return "A UAV failure was detected and spare deployment is pending."
+def nice_step(span, divisions, minimum=0):
+    target = max(span / divisions, minimum)
+    order = 10 ** math.floor(math.log10(target))
+    return next(order * n for n in (1, 2, 2.5, 5, 10) if order * n >= target)
 
 
-def draw_banner(cv, run, st, h):
-    if run.events:
-        # Events are injected at the start of a step; frames are sampled at its end.
-        past = [e for e in run.events if e["t"] < st["t"]]
-        event = past[-1] if past else None
-        if event is None:
-            return
-        if event["kind"] == "closure":
-            base = int(event["detail"].split()[-1]) + 1
-            s = f"Depot D{base} closed at {event['t']:,.0f} seconds. UAVs return to open depots."
+def axis_ticks(values, *, integer=False):
+    low, high = min(0, min(values, default=0)), max(0, max(values, default=0))
+    if low == high:
+        return (0, 1)
+    step = nice_step(high - low, 4, minimum=1 if integer else 0)
+    if integer:
+        step = math.ceil(step)
+    return tuple(i * step for i in range(math.floor(low / step), math.ceil(high / step) + 1))
+
+
+def rolling_average(values, window):
+    recent = deque()
+    total = count = 0
+    for value in values:
+        if len(recent) == window:
+            oldest = recent.popleft()
+            if oldest is not None:
+                total -= oldest
+                count -= 1
+        recent.append(value)
+        if value is None:
+            yield None
         else:
-            count = sum(e["kind"] == "failure" for e in past)
-            total = "1 failure has" if count == 1 else f"{count} failures have"
-            s = f"UAV {event['uav']} was lost at {event['t']:,.0f} seconds; {total} been recorded."
-    else:
-        s = banner_text(run.failure, st["t"])
-    if s is None:
-        return
-    w = measure("small", s) + 36
-    x = PLOT[0] + PLOT[2] / 2 - w / 2
-    y = h - PAD - BANNER_H + 4
-    rr = skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(x, y, w, 32), 16, 16)
-    cv.drawRRect(rr, fill(FAIL, 16))
-    cv.drawRRect(rr, stroke(FAIL, 1.1, 90))
-    text(cv, s, x + 18, y + 21, "small", FAIL)
+            total += value
+            count += 1
+            average = total / count
+            yield 0 if abs(average) < 1e-10 else average
 
 
-def draw_frame(cv, run, pos, h):
+class MonitorTrack:
+    def __init__(self, heading, unit, traces, fields, *, ticks=None, integer=False, breaks=()):
+        self.heading = heading
+        self.unit = unit
+        self.traces = traces
+        self.fields = fields
+        self.breaks = frozenset(breaks)
+        self.ticks = ticks or axis_ticks(
+            [value for _, series in traces for value in series if value is not None], integer=integer
+        )
+        # Reserve each field's width over the complete mission, including both
+        # extremes of signed margins and any wider standby status.
+        self.field_layout = [
+            (label + ":", measure("small", label + ": "),
+             max(measure("small", value, True) for value in values))
+            for label, values in fields
+        ]
+
+    def format_tick(self, value):
+        return f"{value:g}".replace("-", "−")
+
+
+def monitor_tracks(run):
+    fr = run.fr
+    limits = run.d.get("monitor_limits", {})
+    deadline = limits.get("recovery")
+    window = run.d["rolling_window"]
+    sample_step = (fr[-1]["t"] - fr[0]["t"]) / (len(fr) - 1) if len(fr) > 1 else window
+    window_samples = max(1, round(window / sample_step))
+    rolling_label = f"Rolling ({window} s)"
+
+    def read(key):
+        return [f.get(key) for f in fr]
+
+    def constant(value):
+        return [value] * len(fr)
+
+    def seconds(value):
+        return "—" if value is None else f"{value:g} s"
+
+    def gauge(heading, key, unit, factor=1, integer=False):
+        values = [None if value is None else value * factor for value in read(key)]
+        margin_format = "+,.0f" if integer else "+,.1f"
+        violations = 0
+        counts, margins = [], []
+        for i, value in enumerate(values):
+            violations += value is not None and value < 0
+            counts.append(f"{fr[i].get('c2', violations) if key == 'battery_margin' else violations:,}")
+            margins.append("—" if value is None else f"{value:{margin_format}}{unit}")
+        if key != "battery_margin" and all(value is None for value in values):
+            counts = constant("—")
+        return MonitorTrack(heading, unit,
+                            [("Instant", values), (rolling_label, list(rolling_average(values, window_samples)))],
+                            [("Margin", margins), ("Violations", counts)], integer=integer)
+
+    recoveries = run.d.get("recoveries")
+    if recoveries is None:
+        recoveries = []
+        for event in run.events:
+            if event["kind"] == "failure":
+                failure = run.failure or {}
+                restored = failure.get("t_restored") if event["t"] == failure.get("t_fail") else None
+                recoveries.append({"t_fail_s": event["t"], "satisfied": restored is not None,
+                                   "recovery_time_s": None if restored is None else restored - event["t"]})
+    recovery_values, failure_counts, recovery_readouts, misses = [], [], [], []
+    started = prior_misses = 0
+    for frame in fr:
+        now = frame["t"]
+        while started < len(recoveries) and recoveries[started]["t_fail_s"] <= now:
+            if started:
+                prior_misses += not recoveries[started - 1]["satisfied"]
+            started += 1
+        value, elapsed, missed = None, None, False
+        if started:
+            recovery = recoveries[started - 1]
+            elapsed = now - recovery["t_fail_s"]
+            duration = recovery["recovery_time_s"]
+            restored = duration is not None and elapsed >= duration
+            missed = deadline is not None and elapsed >= deadline and (not restored or duration > deadline)
+            if restored:
+                value = duration
+            elif not missed:
+                value = elapsed
+        recovery_values.append(value)
+        failure_counts.append(f"{started:,} / {len(recoveries):,}")
+        recovery_readouts.append(seconds(value if value is not None else elapsed))
+        misses.append(f"{prior_misses + missed:,}")
+
+    coverage = read("cov")
+    return [
+        MonitorTrack("C1: Cell freshness", "%", [("Instant", coverage), (rolling_label, read("roll"))],
+                     [("Fresh cells", [f"{value:.1f}%" for value in coverage]),
+                      ("Overdue cells", [f"{round(len(run.cells) * (1 - value / 100)):,}" for value in coverage]),
+                      ("Age limit", constant(seconds(limits.get("freshness"))))], ticks=tuple(range(0, 101, 20))),
+        gauge("C2: Battery reserve margin", "battery_margin", " pp", 100),
+        MonitorTrack("C3: Spare launch", " Alarms",
+                     [("Late alarms", read("c3_missed")), ("All alarms", read("c3_alarms"))],
+                     [("Late", [f"{value:,}" for value in read("c3_missed")]),
+                      ("Alarms", [f"{value:,}" for value in read("c3_alarms")]),
+                      ("Deadline", constant(seconds(limits.get("launch"))))], integer=True),
+        MonitorTrack("C4: Coverage recovery", " s",
+                     [("Elapsed", recovery_values), ("Deadline", constant(deadline))],
+                     [("Failures", failure_counts), ("Elapsed", recovery_readouts), ("Deadline", constant(seconds(deadline))),
+                      ("Missed", misses)], breaks=[entry["t_fail_s"] for entry in recoveries]),
+        gauge("C5: Return energy margin", "way_home_margin", " pp", 100),
+        gauge("C6: Depot queue margin", "queue_margin", " UAVs", integer=True),
+        gauge("C7: No-fly clearance margin", "zone_clearance", " m"),
+    ]
+
+
+class MonitorPanel:
+    """Seven synchronized STL timelines with fixed axes and readout positions."""
+
+    PALETTE = ("#146d45", "#245ba3", "#6b4194", "#a64c13", "#086b79", "#9b2e44", "#786000")
+
+    def __init__(self, run, height):
+        self.tracks = monitor_tracks(run)
+        self.times = [frame["t"] for frame in run.fr]
+        self.start, self.end = self.times[0], self.times[-1]
+        self.height = height
+        self.left, self.right = 95, MONITOR_W - 35
+        self.row_step = (height - 80) / len(self.tracks)
+        self.plot_height = self.row_step - 32
+        self.playhead = stroke(INK, 1.2, 175)
+        self.events = [(t, label) for t, label in run.event_labels if self.start <= t <= self.end]
+
+    def x(self, time):
+        return self.left + (self.right - self.left) * (time - self.start) / (self.end - self.start or 1)
+
+    def time_ticks(self):
+        if self.start == self.end:
+            return [self.start]
+        step = nice_step(self.end - self.start, 5, minimum=1)
+        ticks = [i * step for i in range(math.ceil(self.start / step), math.floor(self.end / step) + 1)]
+        return [self.start, *(t for t in ticks if self.start + step / 5 < t < self.end - step / 5), self.end]
+
+    def area(self, row):
+        return skia.Rect.MakeLTRB(self.left, 33 + row * self.row_step,
+                                  self.right, 33 + row * self.row_step + self.plot_height)
+
+    def y(self, area, track, value):
+        low, high = track.ticks[0], track.ticks[-1]
+        return area.top() + 4 + (self.plot_height - 8) * (high - value) / (high - low)
+
+    @lru_cache(maxsize=4)
+    def background(self, sx, sy):
+        surface = skia.Surface(round(MONITOR_W * sx), round(self.height * sy))
+        cv = surface.getCanvas()
+        cv.clear(color(CARD))
+        cv.scale(sx, sy)
+        cv.drawLine(0, 0, 0, self.height, stroke(RULE, 2))
+        grid = stroke(GRID, 1)
+        events = stroke(FAIL, 1, 175)
+        events.setPathEffect(skia.DashPathEffect.Make([4, 3], 0))
+        ticks = self.time_ticks()
+        for row, (track, hue) in enumerate(zip(self.tracks, self.PALETTE)):
+            area = self.area(row)
+            top, bottom = area.top(), area.bottom()
+            heading_y = top - 11
+            cv.drawRect(area, fill(PLOT_BG))
+            for t in ticks:
+                x = self.x(t)
+                cv.drawLine(x, top, x, bottom, grid)
+            for tick in track.ticks:
+                y = self.y(area, track, tick)
+                cv.drawLine(self.left, y, self.right, y, grid)
+                text(cv, track.format_tick(tick), self.left - AXIS_GAP, y + 4, "tick", MUTED, "right", tab=True)
+            cv.save()
+            cv.translate(self.left - 56, (top + bottom) / 2)
+            cv.rotate(-90)
+            text(cv, track.unit.strip(), 0, 0, "tick", MUTED, "center")
+            cv.restore()
+            cv.drawRect(area, stroke(RULE, 1))
+            text(cv, track.heading, self.left, heading_y, "heading")
+
+            for t, _ in self.events:
+                x = self.x(t)
+                cv.drawLine(x, top, x, bottom, events)
+            legend_right = self.right
+            for j in reversed(range(len(track.traces))):
+                label, values = track.traces[j]
+                paint = stroke(hue, 1.65, 175 if j else 255)
+                if j:
+                    paint.setPathEffect(skia.DashPathEffect.Make([5, 3], 0))
+                width = text(cv, label, legend_right, heading_y, "small", MUTED, "right")
+                line_end = legend_right - width - 7
+                cv.drawLine(line_end - 20, heading_y - 4, line_end, heading_y - 4, paint)
+                legend_right = line_end - 36
+                path = skia.Path()
+                drawing = False
+                for t, value in zip(self.times, values):
+                    if value is None:
+                        drawing = False
+                        continue
+                    point = self.x(t), self.y(area, track, value)
+                    if drawing and (j or t not in track.breaks):
+                        path.lineTo(*point)
+                    else:
+                        path.moveTo(*point)
+                    drawing = True
+                cv.save()
+                cv.clipRect(area)
+                cv.drawPath(path, paint)
+                cv.restore()
+            if all(value is None for _, values in track.traces for value in values):
+                text(cv, "No samples", (self.left + self.right) / 2, (top + bottom) / 2 + 4,
+                     "small", MUTED, "center")
+
+        bottom = self.area(len(self.tracks) - 1).bottom()
+        for i, t in enumerate(ticks):
+            label = "0" if i == 0 and t == 1 else f"{t:.0f}".replace("-", "−")
+            text(cv, label, self.x(t), bottom + 17, "tick", MUTED, "center", tab=True)
+        lane_ends = [self.left, self.left]
+        for t, label in self.events:
+            width = measure("tick", label)
+            x = min(self.x(t) + 4, self.right - width)
+            for lane, end in enumerate(lane_ends):
+                if x >= end:
+                    text(cv, label, x, bottom + 35 + lane * 14, "tick", FAIL)
+                    lane_ends[lane] = x + width + 8
+                    break
+        text(cv, "Time (s)", (self.left + self.right) / 2, bottom + 65, "small", MUTED, "center")
+        return surface.makeImageSnapshot()
+
+    def draw(self, cv, index):
+        matrix = cv.getTotalMatrix()
+        image = self.background(matrix.getScaleX(), matrix.getScaleY())
+        cv.drawImageRect(image, skia.Rect.MakeWH(MONITOR_W, self.height))
+        cursor = self.x(self.times[index])
+        for row, (track, hue) in enumerate(zip(self.tracks, self.PALETTE)):
+            area = self.area(row)
+            y = area.top() - 11
+            x = self.left + 282
+            for (label, label_width, value_width), (_, values) in zip(track.field_layout, track.fields):
+                text(cv, label + " ", x, y, "small", MUTED)
+                text(cv, values[index], x + label_width, y, "small", INK, tab=True)
+                x += label_width + value_width + 18
+            cv.save()
+            cv.clipRect(area)
+            cv.drawLine(cursor, area.top(), cursor, area.bottom(), self.playhead)
+            for j, (_, values) in enumerate(track.traces):
+                value = values[index]
+                if value is not None:
+                    y = self.y(area, track, value)
+                    cv.drawCircle(cursor, y, 3, fill(hue) if j == 0 else fill(CARD))
+                    cv.drawCircle(cursor, y, 3, stroke(CARD if j == 0 else hue, 1))
+            cv.restore()
+
+
+@lru_cache(maxsize=4)
+def compact_backdrop(h, sx, sy):
+    surface = skia.Surface(round(W * sx), round(h * sy))
+    cv = surface.getCanvas()
+    cv.clear(color(BG))
+    cv.scale(sx, sy)
+    outer = skia.Rect.MakeXYWH(PAD / 2, PAD / 2, W - PAD, h - PAD)
+    shadow = fill("#101828", 10)
+    shadow.setMaskFilter(skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, 5))
+    cv.drawRect(outer.makeOffset(0, 2), shadow)
+    cv.drawRect(outer, fill(CARD))
+    cv.drawRect(outer, stroke(RULE, 1))
+    return surface.makeImageSnapshot()
+
+
+def failure_crosses(depot, count):
+    """Fill a two-column grid beside the depot, preserving earlier positions."""
+    x, y = px(*depot)
+    left, top, width = PLOT
+    right, bottom = left + width, top + PLOT_H
+    side = -1 if x - left > right - x else 1
+    direction = -1 if bottom - y < 40 else 1
+    return [(x + side * (22 + 19 * (slot % 2)), y + direction * 19 * (slot // 2))
+            for slot in range(count)]
+
+
+def draw_frame(cv, run, pos, h, *, compact_hud=False):
     i, fresh, uav = run.at(pos)
     st = run.fr[i]
-    cv.clear(color(CARD))
+    if run.compact:
+        matrix = cv.getTotalMatrix()
+        image = compact_backdrop(h, matrix.getScaleX(), matrix.getScaleY())
+        cv.drawImageRect(image, skia.Rect.MakeWH(W, h))
+    else:
+        cv.clear(color(CARD))
 
     tw = text(cv, run.title, PLOT[0], 42, "title", INK)
-    text(cv, run.meta, PLOT[0] + tw + 16, 42, "meta", MUTED)
+    if run.study_id:
+        text(cv, run.study_id, PLOT[0] + tw + 16, 42, "meta", MUTED)
 
-    draw_axes(cv, run.extended)
-    for r, v in zip(run.rects, fresh):
-        cv.drawRRect(skia.RRect.MakeRectXY(r, 3.5, 3.5), fill(ramp(float(v))))
+    draw_axes(cv, run)
+    levels = fresh.astype(float)
+    if LEVELS:
+        levels = np.rint(levels * (LEVELS - 1)) / (LEVELS - 1)
+    indices = np.rint(levels * 255).astype(np.intp).clip(0, 255)
+    for rect, index in zip(run.rects, indices):
+        cv.drawRect(rect, run.tile_paints[index])
 
     if not run.zone_path.isEmpty():
         cv.drawPath(run.zone_path, fill(ZONE, 224))
@@ -477,36 +775,60 @@ def draw_frame(cv, run, pos, h):
         label = f"D{base + 1}" + (" closed" if closed else "") if run.extended else "Depot"
         text(cv, label, dx, dy - 22, "small", INK, "center")
 
-    parked, flying = [[] for _ in run.depots], []
-    for uid, (x, y, soc) in zip(run.ids, uav):
-        if uid in st.get("failed_uavs", []):
-            fx, fy = px(x, y)
-            cv.drawLine(fx - 6, fy - 6, fx + 6, fy + 6, stroke(FAIL, 2.5))
-            cv.drawLine(fx - 6, fy + 6, fx + 6, fy - 6, stroke(FAIL, 2.5))
-            continue
-        base = next((m for m, p in enumerate(run.depots) if math.hypot(x - p[0], y - p[1]) < 1.0), None)
-        if base is not None:
-            parked[base].append((uid, float(soc)))
-        else:
-            flying.append((uid, x, y, float(soc)))
-    for uid, x, y, soc in sorted(flying, key=lambda u: -u[2]):
-        draw_uav(cv, *px(x, y), soc, uid)
+    fly, failures = [], [0] * len(run.depots)
+    if "failed_uavs" in st:
+        failed = set(st["failed_uavs"])
+    else:
+        failed = {f"{int(event['uav']):02d}" for event in run.events
+                  if event["kind"] == "failure" and event["t"] <= st["t"]}
+    for uid, (x, y, _) in zip(run.ids, uav):
+        if uid in failed:
+            base = run.failure_depots.get(uid)
+            if base is None:
+                base = min(range(len(run.depots)),
+                           key=lambda j: math.dist((x, y), run.depots[j]))
+            failures[base] += 1
+        elif all(math.hypot(x - dx, y - dy) >= 1.0 for dx, dy in run.depots):
+            fly.append((x, y))
+    for x, y in sorted(fly, key=lambda p: -p[1]):
+        marker(cv, *px(x, y))
+    cross = stroke(FAIL, 2.5)
+    for depot, count in zip(run.depots, failures):
+        for x, y in failure_crosses(depot, count):
+            cv.drawLine(x - 6, y - 6, x + 6, y + 6, cross)
+            cv.drawLine(x - 6, y + 6, x + 6, y - 6, cross)
 
-    draw_hud(cv, run, st)
+    draw_hud(cv, run, st, compact=compact_hud)
     draw_legend(cv, bool(run.d.get("zones")))
     draw_colorbar(cv)
-    if run.has_failure:
-        draw_banner(cv, run, st, h)
+    return i
+
+
+def video_height(run):
+    return max(900 if run.extended else 820, canvas_h(run))
+
+
+def draw_video_frame(cv, run, pos, panel):
+    map_height = canvas_h(run)
+    cv.clear(color(CARD))
+    cv.save()
+    cv.translate(0, (panel.height - map_height) / 2)
+    index = draw_frame(cv, run, pos, map_height)
+    cv.restore()
+    cv.save()
+    cv.translate(W, 0)
+    panel.draw(cv, index)
+    cv.restore()
 
 
 class Encoder:
-    def __init__(self, path, w, h, fps, crf):
+    def __init__(self, path, w, h, fps, crf, preset):
         head = ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{w}x{h}", "-r", str(fps), "-i", "-"]
-        if str(path).endswith(".gif"):  # straight from rgb so no chroma subsampling reaches the palette
+        if Path(path).suffix.lower() == ".gif":  # straight from rgb so no chroma subsampling reaches the palette
             tail = ["-vf", "split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
                     "-loop", "0", str(path)]
         else:
-            tail = ["-c:v", "libx264", "-crf", str(crf), "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)]
+            tail = ["-c:v", "libx264", "-crf", str(crf), "-preset", preset, "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)]
         self.p = subprocess.Popen(head + tail, stdin=subprocess.PIPE)
 
     def write(self, b):
@@ -518,17 +840,22 @@ class Encoder:
             raise RuntimeError("ffmpeg failed to encode the animation")
 
 
-def render(run, positions, out, fps, crf=18, limit=None, scale=1.0):
-    w, h0 = W, canvas_h(run)
-    w, h = round(w * scale) // 2 * 2, round(h0 * scale) // 2 * 2  # yuv420p needs even sides
+def render(run, positions, out, fps, crf=18, limit=None, scale=1.0, *, preset="medium"):
+    gif = Path(out).suffix.lower() == ".gif"
+    w0, h0 = (W, canvas_h(run)) if gif else (VIDEO_W, video_height(run))
+    panel = None if gif else MonitorPanel(run, h0)
+    w, h = round(w0 * scale) // 2 * 2, round(h0 * scale) // 2 * 2  # yuv420p needs even sides
     surface = skia.Surface(w, h)
     cv = surface.getCanvas()
-    enc = Encoder(out, w, h, fps, crf)
+    enc = Encoder(out, w, h, fps, crf, preset)
     t0 = time.time()
     for n, pos in enumerate(positions[:limit]):
         cv.save()
-        cv.scale(w / W, h / h0)
-        draw_frame(cv, run, pos, h0)
+        cv.scale(w / w0, h / h0)
+        if panel is None:
+            draw_frame(cv, run, pos, h0, compact_hud=True)
+        else:
+            draw_video_frame(cv, run, pos, panel)
         cv.restore()
         arr = surface.makeImageSnapshot().toarray(colorType=skia.kRGBA_8888_ColorType)
         enc.write(arr.tobytes())
@@ -556,13 +883,13 @@ def main():
     ap.add_argument("--speed", type=float, default=20.0, help="simulation seconds per video second")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--stepped", action="store_true")
-    ap.add_argument("--scale", type=float, default=1.6, help="size relative to the 1200 px layout")
+    ap.add_argument("--scale", type=float, help="layout scale (default 1.6 for GIF, 1.12 for video or still)")
     ap.add_argument("--palette", choices=sorted(PALETTES), default="D")
     ap.add_argument("--at", type=float, default=0.0, help="tick position for --mode still")
     a = ap.parse_args()
     global LEVELS
     set_palette(a.palette)
-    run = Run(a.data)
+    run = Run(a.data, compact_baseline=a.mode in {"video", "gif"})
     stem = re.sub(r"[^a-z0-9]+", "-", a.data.stem.lower()).strip("-") or "scenario"
     defaults = {
         "video": Path(f"assets/multi_depot/videos/{stem}.mp4"),
@@ -571,19 +898,21 @@ def main():
     }
     out = a.out or defaults[a.mode]
     out.parent.mkdir(parents=True, exist_ok=True)
+    scale = a.scale if a.scale is not None else (1.6 if a.mode == "gif" else 1.12)
     if a.mode == "still":
         LEVELS = 32 if a.stepped else None
-        h = canvas_h(run)
-        surface = skia.Surface(round(W * a.scale), round(h * a.scale))
+        h = video_height(run)
+        surface = skia.Surface(round(VIDEO_W * scale), round(h * scale))
         cv = surface.getCanvas()
-        cv.scale(a.scale, a.scale)
-        draw_frame(cv, run, a.at, h)
+        cv.scale(scale, scale)
+        draw_video_frame(cv, run, a.at, MonitorPanel(run, h))
         surface.makeImageSnapshot().save(str(out), skia.kPNG)
     elif a.mode == "video":
-        render(run, video_positions(run, a.fps or 30, speed=a.speed), out, a.fps or 30, limit=a.limit, scale=a.scale)
+        render(run, video_positions(run, a.fps or 30, speed=a.speed), out, a.fps or 30,
+               limit=a.limit, scale=scale)
     else:
         LEVELS = 32
-        render(run, gif_positions(run, a.gif_frames), out, a.fps or 12, crf=10, scale=a.scale)
+        render(run, gif_positions(run, a.gif_frames), out, a.fps or 12, crf=10, scale=scale)
 
 
 if __name__ == "__main__":
