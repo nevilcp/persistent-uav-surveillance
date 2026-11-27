@@ -16,6 +16,7 @@ class UAVState(Enum):
     READY = "ready"  # parked at the depot with a full battery
     ON_ROUTE = "on_route"  # ferrying to / looping on its route
     RETURNING = "returning"  # flying straight home
+    QUEUED = "queued"  # at a base whose turnaround slots are all busy
     SWAPPING = "swapping"  # depot turnaround of duration tau
     FAILED = "failed"  # down in place; takes no further part
 
@@ -37,6 +38,10 @@ class UAV:
     waypoints_reached: int = 0  # waypoints visited since launch
     inserted: set[int] = field(default_factory=set)  # cells bridged for a failed UAV
 
+    home: int = 0  # index of the base the UAV is parked at or heading to
+    leg: list[Point] = field(default_factory=list)  # points left on the way to leg_goal
+    leg_goal: Point | None = None  # destination the leg was planned for
+
     launch_at: float | None = None  # scheduled initial departure d_u
     launched_at: float = -math.inf
     replaced: bool = False  # a replacement has been requested this sortie
@@ -54,6 +59,7 @@ class UAV:
         self.target = 0
         self.waypoints_reached = 0
         self.inserted = set()
+        self.set_leg(None, [])
         self.launch_at = None
         self.launched_at = time
         self.replaced = False
@@ -66,6 +72,12 @@ class UAV:
         self.waypoints = []
         self.target = 0
         self.inserted = set()
+        self.set_leg(None, [])
+
+    def set_leg(self, goal: Point | None, leg: list[Point]) -> None:
+        """Plan the remaining flight to ``goal`` along ``leg``."""
+        self.leg_goal = goal
+        self.leg = leg
 
     def insert_waypoint(self, position: int, cell: Cell) -> None:
         """Temporarily insert ``cell`` before waypoint ``position``."""
@@ -79,20 +91,30 @@ class UAV:
             self.target += 1
         self.inserted.add(cell.index)
 
-    def remove_inserted_waypoints(self) -> None:
+    def remove_inserted_waypoints(self, indices: set[int] | None = None) -> None:
         """Restore the original waypoint list, keeping progress."""
         kept: list[Cell] = []
+        remove = self.inserted if indices is None else self.inserted & indices
         removed_before_target = 0
         for i, cell in enumerate(self.waypoints):
-            if cell.index in self.inserted:
+            if cell.index in remove:
                 removed_before_target += i < self.target
             else:
                 kept.append(cell)
         self.target = (self.target - removed_before_target) % max(len(kept), 1)
         self.waypoints = kept
-        self.inserted = set()
+        self.inserted = self.inserted - remove
 
-    def fly_towards(self, point: Point, max_step: float) -> tuple[float, bool]:
-        """Advance towards ``point``; returns distance flown and arrival."""
-        self.position, flown, arrived = step_towards(self.position, point, max_step)
-        return flown, arrived
+    def fly_leg(self, max_step: float) -> tuple[float, bool]:
+        """Advance along the leg; returns distance flown and arrival at its end."""
+        flown = 0.0
+        while self.leg:
+            # leftover step carries over detour vertices, but not the final arrival
+            self.position, step, arrived = step_towards(
+                self.position, self.leg[0], max_step - flown
+            )
+            flown += step
+            if not arrived:
+                return flown, False
+            self.leg.pop(0)
+        return flown, True

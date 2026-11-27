@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .params import FleetParams
@@ -17,6 +18,17 @@ class FleetSplit:
     @property
     def total(self) -> int:
         return self.n_fly + self.n_rotate + self.n_spare
+
+
+def apportion(total: int, weights: Sequence[int]) -> list[int]:
+    """Integer shares of ``total`` proportional to ``weights`` (largest remainder)."""
+    scale = sum(weights)
+    quotas = [total * w / scale for w in weights]
+    shares = [math.floor(q + 1e-9) for q in quotas]
+    by_remainder = sorted(range(len(weights)), key=lambda i: (shares[i] - quotas[i], i))
+    for i in by_remainder[: total - sum(shares)]:
+        shares[i] += 1
+    return shares
 
 
 def split_fleet(fleet: FleetParams) -> FleetSplit:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Sequence
 
@@ -15,7 +16,7 @@ def distance(p: Point, q: Point) -> float:
 
 def path_length(points: Sequence[Point]) -> float:
     """Length of the open polyline through ``points``."""
-    return sum(distance(a, b) for a, b in zip(points, points[1:]))
+    return sum(distance(a, b) for a, b in itertools.pairwise(points))
 
 
 def step_towards(p: Point, target: Point, max_step: float) -> tuple[Point, float, bool]:
