@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from run_port_study import (
     PORT,
     random_zones,
-    round_robin,
     runs,
     single_base,
 )
@@ -58,7 +57,7 @@ def test_the_runs_differ_from_the_main_run_only_where_the_doc_says():
     )
     assert r["R6"].failure.closed_depot == 2 and r["R6"].failure.closure_time == 1800.0
     assert r["R3"].patrol.mode == "round_robin"
-    split = split_fleet(round_robin().fleet)
+    split = split_fleet(r["R3"].fleet)
     assert (split.n_fly, split.n_rotate, split.n_spare) == (87, 27, 6)
 
 

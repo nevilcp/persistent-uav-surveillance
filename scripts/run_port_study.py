@@ -16,12 +16,11 @@ from uav_surveil import Parameters, make_simulation
 from uav_surveil.fleet import split_fleet
 from uav_surveil.grid import Grid
 from uav_surveil.params import Rect
-from uav_surveil.routing import loop_distance
+from uav_surveil.routing import closed_loop_distance
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT = Parameters.from_json(ROOT / "configs" / "port.json")
 BASE_NAMES = ("west", "east", "north")
-
 
 
 @dataclass
@@ -38,7 +37,6 @@ class Outcome:
     def figures(self) -> dict:
         """Headline numbers of the run."""
         s, sim = self.summary, self.sim
-        theta = self.params.mission.revisit_threshold
         rows = sim.monitor.rows
         # the wait is measured once settled and once every cell has been seen
         first_full = next(
@@ -52,19 +50,16 @@ class Outcome:
             "uavs": sim.split.total,
             "split": f"{sim.split.n_fly}+{sim.split.n_rotate}+{sim.split.n_spare}",
             "max_route_km": max(
-                loop_distance(r.cells, sim.airspace) + sim.airspace.distance(r.cells[-1].position, r.cells[0].position)
-                for r in sim.routes
+                closed_loop_distance(route, sim.airspace) for route in sim.routes
             ) / 1000.0,
             "coverage": s["coverage"]["steady_state_mean_pct"],
             "longest_wait": longest,
-            "fresh": longest <= theta,
             "c2_margin": s["c2_battery"]["min_margin"],
             "c5": s["c5_way_home"]["violating_steps"],
             "c6": s["c6_base_queue"]["violating_steps"],
             "c7": s["c7_zone_clearance"]["violating_steps"],
             "c3": s["c3_spare_launch"]["violations"],
             "alarms": s["c3_spare_launch"]["alarms"],
-            "max_latency": s["c3_spare_launch"]["max_latency_s"],
             "transit": s["transit_share"],
             "passed": s["passed"],
         }
@@ -95,22 +90,13 @@ def single_base(index: int) -> Parameters:
     )
 
 
-def round_robin() -> Parameters:
-    """The paper's plan on the port: 120 UAVs, 87 flying, 27 rotation, 6 spare."""
-    return replace(
-        PORT,
-        patrol=replace(PORT.patrol, mode="round_robin"),
-        fleet=replace(PORT.fleet, size=120, batch_size=27, reserve_fraction=0.05),
-    )
-
-
 def runs() -> dict[str, Parameters]:
     """Every run except the single-base ones."""
     failure = PORT.failure
     return {
         "R0": replace(PORT, dispatch=replace(PORT.dispatch, metric="straight")),
         "R2": replace(PORT, region=replace(PORT.region, zones=())),
-        "R3": round_robin(),
+        "R3": PORT,
         "R4": replace(PORT, failure=replace(failure, enabled=True, time=1800.0, near_depot=1)),
         "R5": replace(
             PORT,
@@ -185,19 +171,18 @@ def run_random_maps(count: int, out: Path) -> list[dict]:
         zones = random_zones(seed)
         region = replace(PORT.region, zones=zones)
         row = {"seed": seed, "zones": len(zones)}
-        for name, base in (("R3", PORT),):
-            outcome = run(f"{name}_map{seed:02d}", replace(base, region=region))
-            if outcome.error:
-                row |= {f"{name}_error": outcome.error}
-                continue
+        outcome = run(f"R3_map{seed:02d}", replace(PORT, region=region))
+        if outcome.error:
+            row["R3_error"] = outcome.error
+        else:
             f = outcome.figures
             row |= {
-                f"{name}_uavs": f["uavs"],
-                f"{name}_coverage": round(f["coverage"], 2),
-                f"{name}_longest_wait": f["longest_wait"],
-                f"{name}_passed": f["passed"],
+                "R3_uavs": f["uavs"],
+                "R3_coverage": round(f["coverage"], 2),
+                "R3_longest_wait": f["longest_wait"],
+                "R3_passed": f["passed"],
+                "free_cells": len(outcome.sim.airspace.free_cells),
             }
-            row["free_cells"] = len(outcome.sim.airspace.free_cells)
         rows.append(row)
     keys = sorted({k for r in rows for k in r}, key=lambda k: (k != "seed", k))
     with open(out / "random_maps.csv", "w", newline="") as handle:
@@ -372,23 +357,14 @@ def plot(outcomes: dict[str, Outcome], random_rows: list[dict], out: Path) -> No
     if random_rows:
         seeds = [r["seed"] for r in random_rows]
         fig, axes = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
-        for name in ("R3",):
-            axes[0].plot(
-                seeds,
-                [r.get(f"{name}_coverage", math.nan) for r in random_rows],
-                "o-",
-                ms=3,
-                lw=0.6,
-                label=name,
-            )
-            axes[1].plot(
-                seeds,
-                [r.get(f"{name}_uavs", math.nan) for r in random_rows],
-                "o-",
-                ms=3,
-                lw=0.6,
-                label=name,
-            )
+        axes[0].plot(
+            seeds, [r.get("R3_coverage", math.nan) for r in random_rows],
+            "o-", ms=3, lw=0.6, label="R3",
+        )
+        axes[1].plot(
+            seeds, [r.get("R3_uavs", math.nan) for r in random_rows],
+            "o-", ms=3, lw=0.6, label="R3",
+        )
         axes[0].set_ylabel("steady coverage (%)")
         axes[1].set_ylabel("UAVs")
         axes[1].set_xlabel("map seed")

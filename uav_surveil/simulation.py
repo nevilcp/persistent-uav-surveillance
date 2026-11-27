@@ -17,6 +17,7 @@ from .monitor import EventLog, Monitor
 from .params import Parameters, Point
 from .routing import (
     Route,
+    assign_bases,
     base_ferry_times,
     check_admissible,
     depot_round_robin_routes,
@@ -162,11 +163,13 @@ class Simulation:
         depot.close(self.time)
         self.events.add(self.time, "closure", "-", f"base {depot.index}")
         open_bases = [d.index for d in self.depots if d.is_open]
-        changed = {}
+        affected = [route for route in self.routes if route.depot == depot.index]
+        changed = {
+            route.id: route
+            for route in assign_bases(affected, self.airspace, open_bases=open_bases)
+        }
         for i, route in enumerate(self.routes):
-            if route.depot == depot.index:
-                base = min(open_bases, key=lambda m: sum(self.airspace.depot_distance(c.position, m) for c in route.cells))
-                changed[route.id] = replace(route, depot=base)
+            if route.id in changed:
                 self.routes[i] = changed[route.id]
         for uav in self.uavs:
             if uav.route and uav.route.id in changed:
@@ -176,8 +179,8 @@ class Simulation:
                     uav.launch_at = None
                     uav.clear_route()
             if uav.state is UAVState.RETURNING and uav.home == depot.index:
-                uav.home, _ = self._nearest_base(uav.position)
-                uav.set_leg(self.airspace.depots[uav.home], self.airspace.depot_path(uav.position, uav.home)[1:])
+                base, _ = self._nearest_base(uav.position)
+                self._set_return_leg(uav, base)
         self.events.add(self.time, "reassign", "-", f"{len(changed)} routes moved from base {depot.index}")
 
     def _launch_scheduled(self) -> None:
@@ -203,14 +206,17 @@ class Simulation:
                 self.monitor.raise_alarm(self.time, uav.route.id, "rotation")
             if must_return(uav.battery, d, cfg.uav, cfg.dispatch):
                 uav.state = UAVState.RETURNING
-                uav.home = base
-                uav.set_leg(
-                    self.airspace.depots[base],
-                    self.airspace.depot_path(uav.position, base)[1:],
-                )
+                self._set_return_leg(uav, base)
                 self.events.add(
                     self.time, "return", uav.id, f"battery {uav.battery:.3f}"
                 )
+
+    def _set_return_leg(self, uav: UAV, base: int) -> None:
+        uav.home = base
+        uav.set_leg(
+            self.airspace.depots[base],
+            self.airspace.depot_path(uav.position, base)[1:],
+        )
 
     def _nearest_base(self, position: Point) -> tuple[int, float]:
         """Closest base and the distance the dispatch rules use to it."""
@@ -221,11 +227,11 @@ class Simulation:
     def _serve_alarms(self) -> None:
         """Launch a reserve UAV for each open alarm, oldest first."""
         for alarm in self.monitor.open_alarms():
-            base = self.routes[alarm.route - 1].depot
-            reserve = self._take_reserve(alarm.kind == "failure", base)
+            route = self.routes[alarm.route - 1]
+            reserve = self._take_reserve(alarm.kind == "failure", route.depot)
             if reserve is None:
                 continue  # alarm stays open and its latency keeps growing
-            reserve.launch(self.routes[alarm.route - 1], self.time)
+            reserve.launch(route, self.time)
             alarm.launch_time = self.time
             self.events.add(
                 self.time, "launch", reserve.id, f"route {alarm.route} ({alarm.kind})"

@@ -70,6 +70,14 @@ def loop_distance(
     return sum(airspace.distance(a, b) for a, b in itertools.pairwise(points))
 
 
+def closed_loop_distance(route: Route, airspace: Airspace) -> float:
+    """Length of a patrol including the last-to-first leg."""
+    cells = route.cells
+    return loop_distance(cells, airspace) + airspace.distance(
+        cells[-1].position, cells[0].position
+    )
+
+
 def airborne_time(
     cells: list[Cell] | tuple[Cell, ...],
     ferry_time: float,
@@ -96,17 +104,20 @@ def base_ferry_times(grid: Grid, airspace: Airspace, uav: UAVParams) -> list[flo
     ]
 
 
-def assign_bases(routes: list[Route], airspace: Airspace) -> list[Route]:
-    """Routes homed at the base nearest, on average, to their cells by flight."""
-    if len(airspace.depots) == 1:
+def assign_bases(
+    routes: list[Route], airspace: Airspace, *, open_bases: Sequence[int] | None = None
+) -> list[Route]:
+    """Home each route at the eligible base with the shortest mean flyable distance."""
+    if open_bases is None and len(airspace.depots) == 1:
         return routes
+    bases = range(len(airspace.depots)) if open_bases is None else open_bases
     homed = []
     for route in routes:
-        mean = [
-            sum(airspace.depot_distance(c.position, m) for c in route.cells)
-            for m in range(len(airspace.depots))
-        ]
-        homed.append(replace(route, depot=mean.index(min(mean))))
+        base = min(
+            bases,
+            key=lambda m: sum(airspace.depot_distance(c.position, m) for c in route.cells),
+        )
+        homed.append(replace(route, depot=base))
     return homed
 
 

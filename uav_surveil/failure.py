@@ -44,9 +44,6 @@ class FailureManager:
         self._first_cover: dict[int, float | None] = {}
         self._insertions: dict[int, set[int]] = {}
 
-    def due(self, time: float) -> bool:
-        return self._cfg.enabled and self.failed_uav is None and time >= self._cfg.time
-
     def inject(self, time: float) -> Route:
         """Fail the UAV flying the configured route and return that route."""
         flying = [
