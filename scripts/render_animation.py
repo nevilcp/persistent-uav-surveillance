@@ -7,7 +7,6 @@ import re
 import subprocess
 import time
 from bisect import bisect_right
-from collections import deque
 from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
@@ -15,24 +14,29 @@ from pathlib import Path
 import numpy as np
 import skia
 
+if __package__:
+    from .media_names import PORT_SCENES, media_stem
+else:
+    from media_names import PORT_SCENES, media_stem
+
 W = 1200
-PAD = 14  # card inset from the canvas edge
 PLOT = (66, 62, 1010)  # left, top, width of the metric plot
+WIDE_MAP_HALF_WIDTH = 1135.0  # metres
+WIDE_MAP_SCALE = PLOT[2] / (2 * WIDE_MAP_HALF_WIDTH)
 XLIM, YLIM = (-550.0, 550.0), (-50.0, 550.0)
 SCALE = PLOT[2] / (XLIM[1] - XLIM[0])
 PLOT_H = (YLIM[1] - YLIM[0]) * SCALE
-MONITOR_W = 1180
-VIDEO_W = W + MONITOR_W
 AXIS_GAP = 9
 SNAP = 25.0  # metres; a larger jump between ticks is a relaunch or swap, not flight
 INK, MUTED, RULE = "#14181f", "#465063", "#d6dce4"
-BG, CARD = "#f4f5f7", "#ffffff"
+CARD = "#ffffff"
 PLOT_BG, GRID = "#fafbfc", "#e1e6ec"
+MONITOR_SOLID, MONITOR_DASHED = "#231561", "#9D3F58"
 FAIL = "#9a3412"
 ZONE = "#1E1B3A"
 ZONE_LINE = "#C4B5FD"
 ZONE_BORDER = "#A78BFA"
-DEPOT = "#e5383b"
+DEPOT = "#000000"
 PALETTES = {  # red -> green as RdYlGn; stops at 0, .25, .5, .75, 1
     "A": ["#b3262d", "#ea6a3c", "#f3d263", "#86c06c", "#1c7c4d"],
     "B": ["#951c2e", "#d0502c", "#dfa52b", "#5b9f55", "#0f6a3d"],
@@ -41,15 +45,14 @@ PALETTES = {  # red -> green as RdYlGn; stops at 0, .25, .5, .75, 1
 }
 RAMP = [(i / 4, c) for i, c in enumerate(PALETTES["D"])]
 
-# type scale: one family, five sizes; weight carries the hierarchy
 TYPE = {
-    "title": (26, 600, "Inter Display"),
-    "meta": (15, 400, "Inter"),
-    "value": (15, 600, "Inter"),
-    "heading": (15, 700, "Inter"),
-    "label": (14, 500, "Inter"),
-    "small": (13, 500, "Inter"),
-    "tick": (12, 400, "Inter"),
+    "tick": (12, 400),
+    "dashboard_title": (27, 700),
+    "dashboard_map_title": (30, 700),
+    "dashboard_heading": (16, 700),
+    "dashboard_monitor_heading": (18, 700),
+    "dashboard_label": (16, 400),
+    "dashboard_tick": (14, 400),
 }
 
 
@@ -88,12 +91,6 @@ def set_palette(name):
 LEVELS = None  # set for the gif: a stepped ramp keeps the 256-colour palette free of dither
 
 
-def ramp(v):
-    if LEVELS:
-        v = round(v * (LEVELS - 1)) / (LEVELS - 1)
-    return LUT[min(max(round(v * 255), 0), 255)]
-
-
 class Fonts:
     def __init__(self):
         self.mgr = skia.FontMgr()
@@ -101,8 +98,11 @@ class Fonts:
 
     def get(self, style):
         if style not in self.cache:
-            size, weight, family = TYPE[style]
-            face = self.mgr.matchFamilyStyle(family, skia.FontStyle(weight, skia.FontStyle.kNormal_Width, skia.FontStyle.kUpright_Slant))
+            size, weight = TYPE[style]
+            face = self.mgr.matchFamilyStyle(
+                "Inter",
+                skia.FontStyle(weight, skia.FontStyle.kNormal_Width, skia.FontStyle.kUpright_Slant),
+            )
             f = skia.Font(face, size)
             f.setSubpixel(True)
             f.setEdging(skia.Font.Edging.kSubpixelAntiAlias)
@@ -183,15 +183,35 @@ def px(x, y):
 LEGACY_SCENARIO_TITLES = {
     "Continuous Patrol": "Continuous patrol",
     "Port Surveillance": "Port surveillance",
-    "Single Depot: West": "Single depot: west",
-    "Single Depot: East": "Single depot: east",
-    "Single Depot: North": "Single depot: north",
+    "Single Depot: West": "West Depot",
+    "Single Depot: East": "East Depot",
+    "Single Depot: North": "North Depot",
+    "Single depot: west": "West Depot",
+    "Single depot: east": "East Depot",
+    "Single depot: north": "North Depot",
     "No-Fly Zones": "No-fly zones",
     "Single Failure": "Single failure",
     "Repeated Failures": "Repeated failures",
     "Depot Closure": "Depot closure",
     "Return Metric Control": "Return metric control",
     "Multiple Depots": "Multiple depots",
+}
+
+LEGACY_PORT_TITLES = {
+    ("R0", "Return metric control"): "Straight-line dispatch",
+    ("R0", "Port surveillance"): "Straight-line dispatch",
+    ("R2", "Multiple depots"): "No NFZs",
+    ("R2", "Port surveillance"): "No NFZs",
+    ("R3", "No-fly zones"): "Nominal",
+    ("R3", "Port surveillance"): "Nominal",
+}
+
+BASELINE_TITLES = {
+    "under_provisioned": "Under-Provisioned",
+    "nominal": "Nominal",
+    "over_provisioned": "Over-Provisioned",
+    "long_horizon": "Long Horizon",
+    "single_failure": "Single Failure",
 }
 
 
@@ -201,17 +221,10 @@ class Run:
         self.d = d
         fr = d["frames"]
         self.n = len(fr)
-        self.t0 = fr[0]["t"]
         self.fresh = np.array([f["fresh"] for f in fr], dtype=np.float32)
         self.ids = [u[0] for u in fr[0]["uavs"]]
         self.uav = np.array([[u[1:] for u in f["uavs"]] for f in fr], dtype=np.float32)  # tick, uav, (x y soc)
         self.fr = fr
-        routes = max(frame.get("routes_due") or 0 for frame in fr)
-        self.hud_value_width = max(
-            measure("value", value, tab=True)
-            for value in (format_hud_time(fr[-1]["t"]), f"{routes:,} / {routes:,}", f"{len(self.ids):,}",
-                          "100.0%", "None due")
-        )
         self.failure = d["failure"]
         self.events = d.get("events", [])
         if not self.events and self.failure:
@@ -223,7 +236,7 @@ class Run:
                 failure_number += 1
                 label = f"Failure {failure_number}"
             elif event["kind"] == "closure":
-                label = f"D{int(event['detail'].split()[-1]) + 1} closure"
+                label = f"D{int(event['detail'].split()[-1]) + 1} Closure"
             else:
                 continue
             self.event_labels.append((event["t"], label))
@@ -232,18 +245,26 @@ class Run:
         self.depot = d["depot"]
         self.depots = d.get("depots", [self.depot])
         self.extended = "extent" in d
-        self.compact = compact_baseline and not self.extended
         global XLIM, YLIM, SCALE, PLOT_H
         XLIM, YLIM = (-550.0, 550.0), (-50.0, 550.0)
-        if not self.compact:
+        if not compact_baseline or self.extended:
             cx, cy = (600, 850) if self.extended else (0, 250)
-            XLIM, YLIM = (cx - 1135, cx + 1135), (cy - 895, cy + 895)
+            XLIM, YLIM = (cx - WIDE_MAP_HALF_WIDTH, cx + WIDE_MAP_HALF_WIDTH), (cy - 895, cy + 895)
         SCALE = PLOT[2] / (XLIM[1] - XLIM[0])
         PLOT_H = (YLIM[1] - YLIM[0]) * SCALE
+        # Keep the triangle proportional to a cell when zooming the baseline map.
+        self.uav_marker_scale = SCALE / WIDE_MAP_SCALE
         title = " ".join(d["title"].split())
         self.title = LEGACY_SCENARIO_TITLES.get(title, title)
         study_id = re.match(r"R\d+(?=\b|_)", d.get("name") or d.get("meta", ""), re.IGNORECASE)
         self.study_id = study_id.group().upper() if study_id else ""
+        if self.title == "Port surveillance" and d.get("name") in PORT_SCENES:
+            self.title = PORT_SCENES[d["name"]][1]
+        self.title = LEGACY_PORT_TITLES.get((self.study_id, self.title), self.title)
+        baseline_title = BASELINE_TITLES.get(d.get("name") or Path(path).stem)
+        if not self.extended and self.title == "Continuous patrol" and baseline_title:
+            self.title = baseline_title
+        self.display_title = f"{self.study_id} · {self.title}" if self.study_id else self.title
         self.zone_path = skia.Path()
         for x0, y0, x1, y1 in d.get("zones", []):
             rect = skia.Path()
@@ -275,10 +296,6 @@ class Run:
         return min(int(pos), self.n - 1), fresh, u
 
 
-def canvas_h(run):
-    return round(PLOT[1] + PLOT_H + 48 + PAD)
-
-
 def draw_axes(cv, run):
     left, top, w = PLOT
     cv.drawRect(skia.Rect.MakeXYWH(left, top, w, PLOT_H), fill(PLOT_BG))
@@ -303,108 +320,10 @@ def draw_axes(cv, run):
     cv.restore()
 
 
-def marker(cv, x, y):
-    path = triangle(x, y, 5.2)
+def marker(cv, x, y, scale=1.0):
+    path = triangle(x, y, 5.2 * scale)
     cv.drawPath(path, fill(CARD))
-    cv.drawPath(path, stroke(INK, 1.25))
-
-
-def chip_box(cv, x, y, w, h, alpha):
-    rect = skia.Rect.MakeXYWH(x, y, w, h)
-    cv.drawRect(rect, fill(CARD, alpha))
-    cv.drawRect(rect, stroke("#b8c1cd", 1))
-
-
-def format_hud_time(t):
-    return f"{int(t)} s"
-
-
-def draw_hud(cv, run, st, *, compact):
-    """Mission state in the current sample, independent of the monitor readouts."""
-    now = st["t"]
-    unstaffed, due = st.get("routes_unstaffed"), st.get("routes_due")
-    if due:
-        gaps = f"{unstaffed:,} / {due:,}" if unstaffed is not None else "—"
-    else:
-        gaps = "None due" if due == 0 else "—"
-    failed = st.get("failed")
-    if failed is None:
-        failed = len(st["failed_uavs"]) if "failed_uavs" in st else bisect_right(run.failure_times, now)
-
-    route_status = ("Unserved", gaps, FAIL if unstaffed else INK)
-    ready_spares = ("Reserves", f"{st['spare']:,}", INK)
-    failed_uavs = ("Losses", f"{failed:,}", INK)
-    if compact:
-        metrics = [route_status, ready_spares, failed_uavs, ("Coverage", f"{st['cov']:.1f}%", INK)]
-    else:
-        metrics = [route_status, ("Patrolling", f"{st['active']:,}", INK), ready_spares, failed_uavs]
-
-    metrics.insert(0, ("Time", format_hud_time(now), INK))
-    x, y = PLOT[0] + 12, PLOT[1] + 12
-    pad, row_height = 12, 22
-    label_width = max(measure("label", label + ": ") for label, _, _ in metrics)
-    width = label_width + run.hud_value_width + 2 * pad
-    box = skia.Rect.MakeXYWH(x, y, width, len(metrics) * row_height + 2 * pad)
-    cv.drawRoundRect(box, 4, 4, fill(CARD))
-    cv.drawRoundRect(box, 4, 4, stroke(RULE, 1))
-    for row, (label, value, ink) in enumerate(metrics):
-        baseline = y + pad + 15 + row * row_height
-        text(cv, label + ": ", x + pad, baseline, "label", MUTED)
-        text(cv, value, box.right() - pad, baseline, "value", ink, "right", tab=True)
-
-
-def draw_legend(cv, zones=False):
-    x1 = PLOT[0] + PLOT[2] - 12
-    y = PLOT[1] + 12
-    uav_label_width = measure("label", "UAVs")  # Preserve the existing legend spacing.
-    w = 24 + measure("label", "Depot") + 26 + 26 + uav_label_width + 14
-    if zones:
-        w += 38 + measure("label", "No-fly zone")
-    chip_box(cv, x1 - w, y, w, 32, 246)
-    x = x1 - w + 14
-    cv.drawPath(star(x + 7, y + 16, 8), fill(DEPOT))
-    x += 22
-    x += text(cv, "Depot", x, y + 21, "label", INK) + 22
-    marker(cv, x + 7, y + 16.5)
-    text(cv, "UAV", x + 22, y + 21, "label", INK)
-    if zones:
-        x += 22 + uav_label_width + 18
-        box = skia.Rect.MakeXYWH(x, y + 10, 13, 13)
-        cv.drawRect(box, fill(ZONE, 224))
-        cv.save()
-        cv.clipRect(box)
-        for offset in (-10, 4, 18):
-            cv.drawLine(x + offset, y + 23, x + offset + 13, y + 10, stroke(ZONE_LINE, 1.5, 89))
-        cv.restore()
-        outline = stroke(ZONE_BORDER, 1)
-        outline.setPathEffect(skia.DashPathEffect.Make([3, 2], 0))
-        cv.drawRect(box.makeInset(1, 1), outline)
-        text(cv, "No-fly zone", x + 20, y + 21, "label", INK)
-
-
-def draw_colorbar(cv):
-    x = PLOT[0] + PLOT[2] + 20
-    y, h = PLOT[1], PLOT_H
-    bar = skia.Rect.MakeXYWH(x, y, 14, h)
-    if LEVELS:
-        cv.save()
-        cv.clipRect(bar)
-        for k in range(LEVELS):
-            cv.drawRect(skia.Rect.MakeXYWH(x, y + h * (1 - (k + 1) / LEVELS) - 0.5, 14, h / LEVELS + 1), fill(ramp(k / (LEVELS - 1))))
-        cv.restore()
-    else:
-        shader = skia.GradientShader.MakeLinear(
-            [(0, y), (0, y + h)], [skia.Color(*hexrgb(c), 255) for _, c in reversed(RAMP)], [1 - p for p, _ in reversed(RAMP)]
-        )
-        cv.drawRect(bar, skia.Paint(AntiAlias=True, Shader=shader))
-    for k in range(6):
-        v = k / 5
-        text(cv, f"{v:.0%}", x + 24, y + h * (1 - v) + 4, "tick", MUTED, tab=True)
-    cv.save()
-    cv.translate(x + 70, y + h / 2)
-    cv.rotate(-90)
-    text(cv, "Cell freshness", 0, 0, "small", MUTED, "center")
-    cv.restore()
+    cv.drawPath(path, stroke(INK, 1.25 * scale))
 
 
 def nice_step(span, divisions, minimum=0):
@@ -423,25 +342,6 @@ def axis_ticks(values, *, integer=False):
     return tuple(i * step for i in range(math.floor(low / step), math.ceil(high / step) + 1))
 
 
-def rolling_average(values, window):
-    recent = deque()
-    total = count = 0
-    for value in values:
-        if len(recent) == window:
-            oldest = recent.popleft()
-            if oldest is not None:
-                total -= oldest
-                count -= 1
-        recent.append(value)
-        if value is None:
-            yield None
-        else:
-            total += value
-            count += 1
-            average = total / count
-            yield 0 if abs(average) < 1e-10 else average
-
-
 class MonitorTrack:
     def __init__(self, heading, unit, traces, fields, *, ticks=None, integer=False, breaks=()):
         self.heading = heading
@@ -452,13 +352,6 @@ class MonitorTrack:
         self.ticks = ticks or axis_ticks(
             [value for _, series in traces for value in series if value is not None], integer=integer
         )
-        # Reserve each field's width over the complete mission, including both
-        # extremes of signed margins and any wider standby status.
-        self.field_layout = [
-            (label + ":", measure("small", label + ": "),
-             max(measure("small", value, True) for value in values))
-            for label, values in fields
-        ]
 
     def format_tick(self, value):
         return f"{value:g}".replace("-", "−")
@@ -468,10 +361,6 @@ def monitor_tracks(run):
     fr = run.fr
     limits = run.d.get("monitor_limits", {})
     deadline = limits.get("recovery")
-    window = run.d["rolling_window"]
-    sample_step = (fr[-1]["t"] - fr[0]["t"]) / (len(fr) - 1) if len(fr) > 1 else window
-    window_samples = max(1, round(window / sample_step))
-    rolling_label = f"Rolling ({window} s)"
 
     def read(key):
         return [f.get(key) for f in fr]
@@ -482,20 +371,20 @@ def monitor_tracks(run):
     def seconds(value):
         return "—" if value is None else f"{value:g} s"
 
+    def count_labels(values):
+        return ["—" if value is None else f"{value:,}" for value in values]
+
     def gauge(heading, key, unit, factor=1, integer=False):
         values = [None if value is None else value * factor for value in read(key)]
         margin_format = "+,.0f" if integer else "+,.1f"
-        violations = 0
-        counts, margins = [], []
-        for i, value in enumerate(values):
-            violations += value is not None and value < 0
-            counts.append(f"{fr[i].get('c2', violations) if key == 'battery_margin' else violations:,}")
-            margins.append("—" if value is None else f"{value:{margin_format}}{unit}")
-        if key != "battery_margin" and all(value is None for value in values):
-            counts = constant("—")
-        return MonitorTrack(heading, unit,
-                            [("Instant", values), (rolling_label, list(rolling_average(values, window_samples)))],
-                            [("Margin", margins), ("Violations", counts)], integer=integer)
+        counts = [
+            frame.get("current_violations", {}).get(key) if value is not None else None
+            for frame, value in zip(fr, values)
+        ]
+        margins = ["—" if value is None else f"{value:{margin_format}}{unit}" for value in values]
+        return MonitorTrack(heading, unit, [("Instant", values)],
+                            [("Margin", margins), ("Violations", count_labels(counts))],
+                            integer=integer)
 
     recoveries = run.d.get("recoveries")
     if recoveries is None:
@@ -504,206 +393,49 @@ def monitor_tracks(run):
             if event["kind"] == "failure":
                 failure = run.failure or {}
                 restored = failure.get("t_restored") if event["t"] == failure.get("t_fail") else None
-                recoveries.append({"t_fail_s": event["t"], "satisfied": restored is not None,
-                                   "recovery_time_s": None if restored is None else restored - event["t"]})
+                recoveries.append({
+                    "t_fail_s": event["t"],
+                    "recovery_time_s": None if restored is None else restored - event["t"],
+                })
     recovery_values, failure_counts, recovery_readouts, misses = [], [], [], []
-    started = prior_misses = 0
+    started = 0
     for frame in fr:
         now = frame["t"]
         while started < len(recoveries) and recoveries[started]["t_fail_s"] <= now:
-            if started:
-                prior_misses += not recoveries[started - 1]["satisfied"]
             started += 1
-        value, elapsed, missed = None, None, False
+        elapsed = None
         if started:
             recovery = recoveries[started - 1]
-            elapsed = now - recovery["t_fail_s"]
             duration = recovery["recovery_time_s"]
-            restored = duration is not None and elapsed >= duration
-            missed = deadline is not None and elapsed >= deadline and (not restored or duration > deadline)
-            if restored:
-                value = duration
-            elif not missed:
-                value = elapsed
-        recovery_values.append(value)
-        failure_counts.append(f"{started:,} / {len(recoveries):,}")
-        recovery_readouts.append(seconds(value if value is not None else elapsed))
-        misses.append(f"{prior_misses + missed:,}")
+            age = now - recovery["t_fail_s"]
+            if duration is None or age < duration:
+                elapsed = age
+        active = elapsed is not None
+        recovery_values.append(elapsed)
+        failure_counts.append(str(int(active)))
+        recovery_readouts.append(seconds(elapsed))
+        misses.append(str(int(active and deadline is not None and elapsed >= deadline)))
 
+    alarm_traces = [("Late", read("c3_overdue")), ("Waiting", read("c3_pending"))]
+    alarm_fields = [(name, count_labels(values)) for name, values in alarm_traces]
     coverage = read("cov")
     return [
-        MonitorTrack("C1: Cell freshness", "%", [("Instant", coverage), (rolling_label, read("roll"))],
+        MonitorTrack("C1: Coverage", "%", [("Instant", coverage)],
                      [("Fresh cells", [f"{value:.1f}%" for value in coverage]),
                       ("Overdue cells", [f"{round(len(run.cells) * (1 - value / 100)):,}" for value in coverage]),
                       ("Age limit", constant(seconds(limits.get("freshness"))))], ticks=tuple(range(0, 101, 20))),
         gauge("C2: Battery reserve margin", "battery_margin", " pp", 100),
-        MonitorTrack("C3: Spare launch", " Alarms",
-                     [("Late alarms", read("c3_missed")), ("All alarms", read("c3_alarms"))],
-                     [("Late", [f"{value:,}" for value in read("c3_missed")]),
-                      ("Alarms", [f"{value:,}" for value in read("c3_alarms")]),
-                      ("Deadline", constant(seconds(limits.get("launch"))))], integer=True),
+        MonitorTrack("C3: Spare launch", " Alarms", alarm_traces,
+                     [*alarm_fields, ("Deadline", constant(seconds(limits.get("launch"))))], integer=True),
         MonitorTrack("C4: Coverage recovery", " s",
                      [("Elapsed", recovery_values), ("Deadline", constant(deadline))],
-                     [("Failures", failure_counts), ("Elapsed", recovery_readouts), ("Deadline", constant(seconds(deadline))),
-                      ("Missed", misses)], breaks=[entry["t_fail_s"] for entry in recoveries]),
+                     [("Active", failure_counts), ("Elapsed", recovery_readouts),
+                      ("Deadline", constant(seconds(deadline))), ("Overdue", misses)],
+                     breaks=[entry["t_fail_s"] for entry in recoveries]),
         gauge("C5: Return energy margin", "way_home_margin", " pp", 100),
         gauge("C6: Depot queue margin", "queue_margin", " UAVs", integer=True),
         gauge("C7: No-fly clearance margin", "zone_clearance", " m"),
     ]
-
-
-class MonitorPanel:
-    """Seven synchronized STL timelines with fixed axes and readout positions."""
-
-    PALETTE = ("#146d45", "#245ba3", "#6b4194", "#a64c13", "#086b79", "#9b2e44", "#786000")
-
-    def __init__(self, run, height):
-        self.tracks = monitor_tracks(run)
-        self.times = [frame["t"] for frame in run.fr]
-        self.start, self.end = self.times[0], self.times[-1]
-        self.height = height
-        self.left, self.right = 95, MONITOR_W - 35
-        self.row_step = (height - 80) / len(self.tracks)
-        self.plot_height = self.row_step - 32
-        self.playhead = stroke(INK, 1.2, 175)
-        self.events = [(t, label) for t, label in run.event_labels if self.start <= t <= self.end]
-
-    def x(self, time):
-        return self.left + (self.right - self.left) * (time - self.start) / (self.end - self.start or 1)
-
-    def time_ticks(self):
-        if self.start == self.end:
-            return [self.start]
-        step = nice_step(self.end - self.start, 5, minimum=1)
-        ticks = [i * step for i in range(math.ceil(self.start / step), math.floor(self.end / step) + 1)]
-        return [self.start, *(t for t in ticks if self.start + step / 5 < t < self.end - step / 5), self.end]
-
-    def area(self, row):
-        return skia.Rect.MakeLTRB(self.left, 33 + row * self.row_step,
-                                  self.right, 33 + row * self.row_step + self.plot_height)
-
-    def y(self, area, track, value):
-        low, high = track.ticks[0], track.ticks[-1]
-        return area.top() + 4 + (self.plot_height - 8) * (high - value) / (high - low)
-
-    @lru_cache(maxsize=4)
-    def background(self, sx, sy):
-        surface = skia.Surface(round(MONITOR_W * sx), round(self.height * sy))
-        cv = surface.getCanvas()
-        cv.clear(color(CARD))
-        cv.scale(sx, sy)
-        cv.drawLine(0, 0, 0, self.height, stroke(RULE, 2))
-        grid = stroke(GRID, 1)
-        events = stroke(FAIL, 1, 175)
-        events.setPathEffect(skia.DashPathEffect.Make([4, 3], 0))
-        ticks = self.time_ticks()
-        for row, (track, hue) in enumerate(zip(self.tracks, self.PALETTE)):
-            area = self.area(row)
-            top, bottom = area.top(), area.bottom()
-            heading_y = top - 11
-            cv.drawRect(area, fill(PLOT_BG))
-            for t in ticks:
-                x = self.x(t)
-                cv.drawLine(x, top, x, bottom, grid)
-            for tick in track.ticks:
-                y = self.y(area, track, tick)
-                cv.drawLine(self.left, y, self.right, y, grid)
-                text(cv, track.format_tick(tick), self.left - AXIS_GAP, y + 4, "tick", MUTED, "right", tab=True)
-            cv.save()
-            cv.translate(self.left - 56, (top + bottom) / 2)
-            cv.rotate(-90)
-            text(cv, track.unit.strip(), 0, 0, "tick", MUTED, "center")
-            cv.restore()
-            cv.drawRect(area, stroke(RULE, 1))
-            text(cv, track.heading, self.left, heading_y, "heading")
-
-            for t, _ in self.events:
-                x = self.x(t)
-                cv.drawLine(x, top, x, bottom, events)
-            legend_right = self.right
-            for j in reversed(range(len(track.traces))):
-                label, values = track.traces[j]
-                paint = stroke(hue, 1.65, 175 if j else 255)
-                if j:
-                    paint.setPathEffect(skia.DashPathEffect.Make([5, 3], 0))
-                width = text(cv, label, legend_right, heading_y, "small", MUTED, "right")
-                line_end = legend_right - width - 7
-                cv.drawLine(line_end - 20, heading_y - 4, line_end, heading_y - 4, paint)
-                legend_right = line_end - 36
-                path = skia.Path()
-                drawing = False
-                for t, value in zip(self.times, values):
-                    if value is None:
-                        drawing = False
-                        continue
-                    point = self.x(t), self.y(area, track, value)
-                    if drawing and (j or t not in track.breaks):
-                        path.lineTo(*point)
-                    else:
-                        path.moveTo(*point)
-                    drawing = True
-                cv.save()
-                cv.clipRect(area)
-                cv.drawPath(path, paint)
-                cv.restore()
-            if all(value is None for _, values in track.traces for value in values):
-                text(cv, "No samples", (self.left + self.right) / 2, (top + bottom) / 2 + 4,
-                     "small", MUTED, "center")
-
-        bottom = self.area(len(self.tracks) - 1).bottom()
-        for i, t in enumerate(ticks):
-            label = "0" if i == 0 and t == 1 else f"{t:.0f}".replace("-", "−")
-            text(cv, label, self.x(t), bottom + 17, "tick", MUTED, "center", tab=True)
-        lane_ends = [self.left, self.left]
-        for t, label in self.events:
-            width = measure("tick", label)
-            x = min(self.x(t) + 4, self.right - width)
-            for lane, end in enumerate(lane_ends):
-                if x >= end:
-                    text(cv, label, x, bottom + 35 + lane * 14, "tick", FAIL)
-                    lane_ends[lane] = x + width + 8
-                    break
-        text(cv, "Time (s)", (self.left + self.right) / 2, bottom + 65, "small", MUTED, "center")
-        return surface.makeImageSnapshot()
-
-    def draw(self, cv, index):
-        matrix = cv.getTotalMatrix()
-        image = self.background(matrix.getScaleX(), matrix.getScaleY())
-        cv.drawImageRect(image, skia.Rect.MakeWH(MONITOR_W, self.height))
-        cursor = self.x(self.times[index])
-        for row, (track, hue) in enumerate(zip(self.tracks, self.PALETTE)):
-            area = self.area(row)
-            y = area.top() - 11
-            x = self.left + 282
-            for (label, label_width, value_width), (_, values) in zip(track.field_layout, track.fields):
-                text(cv, label + " ", x, y, "small", MUTED)
-                text(cv, values[index], x + label_width, y, "small", INK, tab=True)
-                x += label_width + value_width + 18
-            cv.save()
-            cv.clipRect(area)
-            cv.drawLine(cursor, area.top(), cursor, area.bottom(), self.playhead)
-            for j, (_, values) in enumerate(track.traces):
-                value = values[index]
-                if value is not None:
-                    y = self.y(area, track, value)
-                    cv.drawCircle(cursor, y, 3, fill(hue) if j == 0 else fill(CARD))
-                    cv.drawCircle(cursor, y, 3, stroke(CARD if j == 0 else hue, 1))
-            cv.restore()
-
-
-@lru_cache(maxsize=4)
-def compact_backdrop(h, sx, sy):
-    surface = skia.Surface(round(W * sx), round(h * sy))
-    cv = surface.getCanvas()
-    cv.clear(color(BG))
-    cv.scale(sx, sy)
-    outer = skia.Rect.MakeXYWH(PAD / 2, PAD / 2, W - PAD, h - PAD)
-    shadow = fill("#101828", 10)
-    shadow.setMaskFilter(skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, 5))
-    cv.drawRect(outer.makeOffset(0, 2), shadow)
-    cv.drawRect(outer, fill(CARD))
-    cv.drawRect(outer, stroke(RULE, 1))
-    return surface.makeImageSnapshot()
 
 
 def failure_crosses(depot, count):
@@ -717,21 +449,7 @@ def failure_crosses(depot, count):
             for slot in range(count)]
 
 
-def draw_frame(cv, run, pos, h, *, compact_hud=False):
-    i, fresh, uav = run.at(pos)
-    st = run.fr[i]
-    if run.compact:
-        matrix = cv.getTotalMatrix()
-        image = compact_backdrop(h, matrix.getScaleX(), matrix.getScaleY())
-        cv.drawImageRect(image, skia.Rect.MakeWH(W, h))
-    else:
-        cv.clear(color(CARD))
-
-    tw = text(cv, run.title, PLOT[0], 42, "title", INK)
-    if run.study_id:
-        text(cv, run.study_id, PLOT[0] + tw + 16, 42, "meta", MUTED)
-
-    draw_axes(cv, run)
+def draw_surveillance_grid(cv, run, fresh):
     levels = fresh.astype(float)
     if LEVELS:
         levels = np.rint(levels * (LEVELS - 1)) / (LEVELS - 1)
@@ -760,6 +478,9 @@ def draw_frame(cv, run, pos, h, *, compact_hud=False):
         glow.setMaskFilter(skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, 4))
         cv.drawPath(run.zone_border, glow)
         cv.drawPath(run.zone_border, border)
+
+
+def draw_map_markers(cv, run, st, uav):
     points = run.d.get("loop_polyline", [])
     if points:
         path = skia.Path()
@@ -768,13 +489,6 @@ def draw_frame(cv, run, pos, h, *, compact_hud=False):
             path.lineTo(*px(*point))
         path.close()
         cv.drawPath(path, stroke("#475569", 1, 90))
-    for base, depot in enumerate(run.depots):
-        dx, dy = px(*depot)
-        closed = base in st.get("closed_depots", [])
-        cv.drawPath(star(dx, dy, 12), stroke(DEPOT, 2) if closed else fill(DEPOT))
-        label = f"D{base + 1}" + (" closed" if closed else "") if run.extended else "Depot"
-        text(cv, label, dx, dy - 22, "small", INK, "center")
-
     fly, failures = [], [0] * len(run.depots)
     if "failed_uavs" in st:
         failed = set(st["failed_uavs"])
@@ -791,34 +505,463 @@ def draw_frame(cv, run, pos, h, *, compact_hud=False):
         elif all(math.hypot(x - dx, y - dy) >= 1.0 for dx, dy in run.depots):
             fly.append((x, y))
     for x, y in sorted(fly, key=lambda p: -p[1]):
-        marker(cv, *px(x, y))
+        marker(cv, *px(x, y), scale=run.uav_marker_scale)
     cross = stroke(FAIL, 2.5)
     for depot, count in zip(run.depots, failures):
         for x, y in failure_crosses(depot, count):
             cv.drawLine(x - 6, y - 6, x + 6, y + 6, cross)
             cv.drawLine(x - 6, y + 6, x + 6, y - 6, cross)
 
-    draw_hud(cv, run, st, compact=compact_hud)
-    draw_legend(cv, bool(run.d.get("zones")))
-    draw_colorbar(cv)
-    return i
 
+class R3Dashboard:
+    """A 16:9 map and STL dashboard for the baseline and port studies."""
 
-def video_height(run):
-    return max(900 if run.extended else 820, canvas_h(run))
+    width, height = 1920, 1080
+    margin = 52
+    map_x, map_y, map_scale = 80, 213, 0.84
+    title_y = 72
+    metrics_bottom = title_y + 85
+    chart_left, chart_right = 1100, width - margin - 17
+    chart_top, row_gap = 133, 35
+    metric_separator, metric_gap, metric_padding = "·", 4, 6
+    metric_key_width, metric_key_gap = 12, 5
+    title, heading, label, tick = (
+        "dashboard_title", "dashboard_heading", "dashboard_label", "dashboard_tick",
+    )
+    trace, comparison = MONITOR_SOLID, MONITOR_DASHED
+    plot_grid, zero_rule, cursor_ink = "#e5e5ed", "#c9c4d6", "#665a79"
+    map_depot, map_warning = DEPOT, "#a14022"
+    negative_margins = (1, 4, 5, 6)
+    field_names = (
+        ("Fresh", "Overdue", "Age Limit"),
+        ("Margin", "Violations"),
+        ("Late", "Waiting", "Deadline"),
+        ("Active", "Elapsed", "Deadline", "Overdue"),
+        ("Margin", "Violations"),
+        ("Margin", "Violations"),
+        ("Margin", "Violations"),
+    )
 
+    def __init__(self, run):
+        self.run = run
+        self.violation = RAMP[0][1]
+        self.tracks = monitor_tracks(run)
+        self.monitor_keys = {
+            2: {0: (self.violation, False), 1: (self.comparison, True)},
+            3: {1: (self.trace, False), 2: (self.comparison, True)},
+        }
+        # Reserve space for the widest reading in each field of this table.
+        self.metric_widths = [
+            [2 * self.metric_padding + measure(self.tick, label)
+             + measure(self.tick, self.metric_separator) + 2 * self.metric_gap
+             + max(measure(self.heading, self.readout(value), True) for value in set(values))
+             + (self.metric_key_width + self.metric_key_gap if col in self.monitor_keys.get(row, {}) else 0)
+             for col, (label, (_, values)) in enumerate(zip(self.field_names[row], track.fields))]
+            for row, track in enumerate(self.tracks)
+        ]
+        self.times = [frame["t"] for frame in run.fr]
+        self.start = 0 if self.times[0] == 1 else self.times[0]
+        self.end = self.times[-1]
+        map_height = round(PLOT[1] + PLOT_H + 62)
+        self.map_canvas_height = max(900 if run.extended else 820, map_height)
+        self.map_offset = (self.map_canvas_height - map_height) / 2
+        self.map_layer = lru_cache(maxsize=4)(self.map_layer)
+        if run.extended:
+            bounds = (-600, 1820, 1800, -100)
+            self.map_xticks = range(-600, 1801, 200)
+            self.map_yticks = range(0, 1801, 200)
+        else:
+            bounds = (-600, 730, 600, -230)
+            self.map_xticks = range(-600, 601, 100)
+            self.map_yticks = range(-200, 701, 100)
+            self.map_scale = (0.84 * WIDE_MAP_SCALE * 2400) / (1200 * SCALE)
+            left, top = px(*bounds[:2])
+            self.map_x = 111 - self.map_scale * left
+            self.map_y = 237 - self.map_scale * (top + self.map_offset)
+        self.map_area = skia.Rect.MakeLTRB(*self.map_point(*bounds[:2]), *self.map_point(*bounds[2:]))
+        xs, ys = zip(*run.cells)
+        half = run.d["cell_size"] / 2
+        self.grid = skia.Rect.MakeLTRB(*px(min(xs) - half, max(ys) + half),
+                                      *px(max(xs) + half, min(ys) - half))
+        if not run.zone_path.isEmpty():
+            self.grid.join(run.zone_border.getBounds().makeOutset(14, 14))
+        self.grid.outset(2, 2)
+        self.row_y = (self.map_area.bottom() - self.chart_top + self.row_gap) / len(self.tracks)
+        self.axes = [self.axis(row, track) for row, track in enumerate(self.tracks)]
+        self.paths = [[self.path(row, series, track.breaks if j == 0 else ())
+                       for j, (_, series) in enumerate(track.traces)]
+                      for row, track in enumerate(self.tracks)]
+        self.violations = {
+            row: self.violation_path(row, self.tracks[row].traces[0][1])
+            for row in (*self.negative_margins, 2)
+        }
+        self.time_ticks = self.make_time_ticks()
+        self.has_alarm_data = any(v is not None for v in self.tracks[2].traces[1][1])
+        self.has_recovery = any(v is not None for v in self.tracks[3].traces[0][1])
 
-def draw_video_frame(cv, run, pos, panel):
-    map_height = canvas_h(run)
-    cv.clear(color(CARD))
-    cv.save()
-    cv.translate(0, (panel.height - map_height) / 2)
-    index = draw_frame(cv, run, pos, map_height)
-    cv.restore()
-    cv.save()
-    cv.translate(W, 0)
-    panel.draw(cv, index)
-    cv.restore()
+    def map_point(self, x, y):
+        mx, my = px(x, y)
+        return self.map_x + self.map_scale * mx, self.map_y + self.map_scale * (my + self.map_offset)
+
+    def map_transform(self, cv):
+        # Use a whole-device-pixel translation, including at alternate output scales.
+        matrix = cv.getTotalMatrix()
+        sx, sy = matrix.getScaleX(), matrix.getScaleY()
+        cv.translate(round(self.map_x * sx) / sx, round(self.map_y * sy) / sy)
+        cv.scale(self.map_scale, self.map_scale)
+        cv.translate(0, self.map_offset)
+
+    def map_layer(self, sx, sy):
+        # Rasterize at the legacy origin. Fractional transforms after translation
+        # can shift antialiasing by a pixel even when the translation is integral.
+        sx, sy = self.map_scale * sx, self.map_scale * sy
+        region = skia.IRect.MakeLTRB(
+            math.floor(self.grid.left() * sx), math.floor((self.grid.top() + self.map_offset) * sy),
+            math.ceil(self.grid.right() * sx), math.ceil((self.grid.bottom() + self.map_offset) * sy),
+        )
+        surface = skia.Surface(round(W * sx), round(self.map_canvas_height * sy))
+        cv = surface.getCanvas()
+        cv.clear(color(CARD))
+        cv.scale(sx, sy)
+        cv.translate(0, self.map_offset)
+        draw_axes(cv, self.run)
+        return surface, region, surface.makeImageSnapshot()
+
+    def draw_protected_map(self, cv, st, fresh, uav):
+        matrix = cv.getTotalMatrix()
+        sx, sy = matrix.getScaleX(), matrix.getScaleY()
+        surface, region, base = self.map_layer(sx, sy)
+        layer = surface.getCanvas()
+        layer.save()
+        layer.resetMatrix()
+        layer.drawImage(base, 0, 0)
+        layer.restore()
+        draw_surveillance_grid(layer, self.run, fresh)
+        draw_map_markers(layer, self.run, st, uav)
+        pixels = surface.makeImageSnapshot().makeSubset(region)
+        cv.save()
+        cv.resetMatrix()
+        cv.drawImage(pixels, round(self.map_x * sx + matrix.getTranslateX()) + region.left(),
+                     round(self.map_y * sy + matrix.getTranslateY()) + region.top())
+        cv.restore()
+
+    def map_header(self, cv, st):
+        title = re.sub(r"\b[a-z]", lambda match: match[0].upper(), self.run.display_title)
+        text(cv, title, self.margin, self.title_y, "dashboard_map_title")
+        due, unstaffed = st.get("routes_due"), st.get("routes_unstaffed")
+        routes = f"{unstaffed:,} / {due:,}" if due and unstaffed is not None else "None Due" if due == 0 else "—"
+        losses = st.get("failed")
+        if losses is None:
+            losses = (len(st["failed_uavs"]) if "failed_uavs" in st
+                      else bisect_right(self.run.failure_times, st["t"]))
+        fields = (
+            ("Time (s)", self.readout(f"{st['t']:g}")),
+            ("Unserved Routes", routes),
+            ("Patrolling UAVs", f"{st['active']:,}"),
+            ("Reserve UAVs", f"{st['spare']:,}"),
+            ("UAV Losses", f"{losses:,}"),
+        )
+        box = skia.Rect.MakeLTRB(self.margin, self.title_y + 20, self.map_area.right(), self.metrics_bottom)
+        cv.drawRect(box, fill(PLOT_BG))
+        cv.drawRect(box, stroke(RULE, 1))
+        for j, (label, value) in enumerate(fields):
+            x = box.left() + 15 + j * box.width() / len(fields)
+            text(cv, label, x, box.top() + 24, self.tick, MUTED)
+            is_status = value in {"None Due", "—"}
+            ink = self.map_warning if (j == 1 and unstaffed) or (j == 4 and losses) else INK
+            text(cv, value, x, box.top() + 54, self.label if is_status else self.title,
+                 MUTED if is_status else ink, tab=True)
+
+        x, y = self.margin + 9, box.bottom() + 29
+        cv.drawPath(star(x, y, 9), fill(self.map_depot))
+        x += 16 + text(cv, "Depot", x + 16, y + 5, self.label) + 28
+        marker(cv, x, y)
+        x += 13 + text(cv, "UAV", x + 13, y + 5, self.label) + 23
+        if self.run.d.get("zones"):
+            swatch = skia.Rect.MakeXYWH(x, y - 8, 19, 16)
+            cv.drawRect(swatch, fill(ZONE, 224))
+            cv.save()
+            cv.clipRect(swatch)
+            for offset in (-12, -2, 8, 18):
+                cv.drawLine(x + offset, y + 8, x + offset + 16, y - 8, stroke(ZONE_LINE, 1.3, 89))
+            cv.restore()
+            cv.drawRect(swatch.makeInset(0.5, 0.5), self.pen(ZONE_BORDER, 1.4, (5, 3)))
+            text(cv, "No-Fly Zone", x + 27, y + 5, self.label)
+
+    def draw_map(self, cv, index, fresh, uav):
+        st = self.run.fr[index]
+        self.map_header(cv, st)
+        left, top, right, bottom = tuple(self.map_area)
+        cv.drawRect(self.map_area, fill(PLOT_BG))
+        grid = stroke("#e9edf2", 1)
+        for value in self.map_xticks:
+            x, _ = self.map_point(value, 0)
+            cv.drawLine(x, top, x, bottom, grid)
+            text(cv, self.readout(str(value)), x, bottom + 45, self.tick, MUTED, "center", tab=True)
+        for value in self.map_yticks:
+            _, y = self.map_point(0, value)
+            cv.drawLine(left, y, right, y, grid)
+            text(cv, str(value), left - 8, y + 5, self.tick, MUTED, "right", tab=True)
+        text(cv, "X (m)", (left + right) / 2, bottom + 70, self.label, MUTED, "center")
+        self.vertical_label(cv, "Y (m)", left - 48, (top + bottom) / 2)
+
+        cv.save()
+        self.map_transform(cv)
+        draw_map_markers(cv, self.run, st, uav)
+        cv.restore()
+        self.draw_protected_map(cv, st, fresh, uav)
+        for depot, point in enumerate(self.run.depots):
+            x, y = self.map_point(*point)
+            closed = depot in st.get("closed_depots", ())
+            cv.drawPath(star(x, y, 10), stroke(self.map_depot, 2) if closed else fill(self.map_depot))
+            label = f"D{depot + 1}" + (" Closed" if closed else "")
+            text(cv, label, x, y - 16, self.heading, self.map_warning if closed else INK, "center")
+
+        self.draw_freshness_scale(cv)
+
+    def draw_freshness_scale(self, cv):
+        right = self.map_area.right() - 17
+        left = right - 420
+        height = 12
+        gap_center = (self.metrics_bottom + self.map_area.top()) / 2
+        top = gap_center - height / 2
+        bar = skia.Rect.MakeXYWH(left, top, right - left, height)
+        endcap = 12
+        if LEVELS:
+            width = bar.width() / LEVELS
+            for j in range(LEVELS):
+                swatch = skia.Rect.MakeXYWH(left + j * width, top, width, bar.height())
+                cv.drawRect(swatch, fill(LUT[round(255 * j / (LEVELS - 1))]))
+        else:
+            # Clamp the gradient into flat endpoint swatches, so the reference
+            # pixels sit away from chroma subsampling at the outside edges.
+            shader = skia.GradientShader.MakeLinear(
+                [(left + endcap, top), (right - endcap, top)],
+                [color(c) for _, c in RAMP], [p for p, _ in RAMP],
+            )
+            cv.drawRect(bar, skia.Paint(Shader=shader))
+        for value in range(0, 101, 20):
+            if value == 0:
+                x = left + endcap / 2
+            elif value == 100:
+                x = right - endcap / 2
+            else:
+                inset = 0 if LEVELS else endcap
+                x = left + inset + (bar.width() - 2 * inset) * value / 100
+            cv.drawLine(x, bar.bottom(), x, bar.bottom() + 4, stroke(RULE, 1))
+            text(cv, str(value), x, bar.bottom() + 19, self.tick, MUTED, "center", tab=True)
+        text(cv, "Cell Freshness (%)", left, top - 9, self.label, MUTED)
+
+    def vertical_label(self, cv, label, x, y):
+        cv.save()
+        cv.translate(x, y)
+        cv.rotate(-90)
+        text(cv, label, 0, 0, self.label, MUTED, "center")
+        cv.restore()
+
+    @staticmethod
+    def readout(value):
+        return value.replace("-", "−").replace(" ", "\u00a0")
+
+    def make_time_ticks(self):
+        # Choose regular elapsed-time ticks. Leave room for endpoint labels.
+        if self.start == self.end:
+            return [self.start]
+        step = nice_step(self.end - self.start, 5, minimum=0.001)
+        interior = range(math.ceil(self.start / step), math.floor(self.end / step) + 1)
+        return [self.start, *(i * step for i in interior
+                              if self.start + step / 4 < i * step < self.end - step / 4), self.end]
+
+    def x(self, timestamp):
+        return self.chart_left + (self.chart_right - self.chart_left) * (
+            (timestamp - self.start) / (self.end - self.start or 1))
+
+    def area(self, row):
+        top = self.chart_top + row * self.row_y
+        return skia.Rect.MakeLTRB(self.chart_left, top, self.chart_right, top + self.row_y - self.row_gap)
+
+    @staticmethod
+    def axis(row, track):
+        ticks = track.ticks
+        low, high = ticks[0], ticks[-1]
+        pad = (high - low) * 0.12
+        if row == 0:
+            ticks = (0, 50, 100)
+        elif len(ticks) > 3:
+            midpoint = (low + high) / 2
+            ticks = (low, round(midpoint) if row in (2, 5) else midpoint, high)
+        return ticks, low - pad, high + pad
+
+    def y(self, row, value):
+        area = self.area(row)
+        _, low, high = self.axes[row]
+        return area.bottom() - area.height() * (value - low) / (high - low)
+
+    def path(self, row, series, breaks):
+        path, drawing = skia.Path(), False
+        area = self.area(row)
+        _, low, high = self.axes[row]
+        for timestamp, value in zip(self.times, series):
+            if value is None:
+                drawing = False
+                continue
+            y = area.bottom() - area.height() * (value - low) / (high - low)
+            (path.lineTo if drawing and timestamp not in breaks else path.moveTo)(self.x(timestamp), y)
+            drawing = True
+        return path
+
+    def violation_path(self, row, series):
+        path = skia.Path()
+        previous_drawn = False
+        threshold = max if row == 2 else min
+        for i, (a, b) in enumerate(pairwise(series)):
+            bad = a is not None and b is not None and self.is_violation(row, threshold(a, b))
+            if bad:
+                if not previous_drawn:
+                    path.moveTo(self.x(self.times[i]), self.y(row, a))
+                path.lineTo(self.x(self.times[i + 1]), self.y(row, b))
+            previous_drawn = bad
+        return path
+
+    def is_violation(self, row, value):
+        return value > 0 if row == 2 else row in self.negative_margins and value < 0
+
+    @staticmethod
+    def pen(ink, width, dash=()):
+        paint = stroke(ink, width)
+        if dash:
+            paint.setPathEffect(skia.DashPathEffect.Make(dash, 0))
+        return paint
+
+    def series_sample(self, cv, x, y, ink, *, dashed=False, width=24):
+        cv.drawLine(x, y - 5, x + width, y - 5, self.pen(ink, 2, (5, 4) if dashed else ()))
+
+    def draw_paths(self, cv, row, area, cursor):
+        path_count = len(self.paths[row])
+        cv.save()
+        cv.clipRect(area)
+        if row == 3:
+            cv.drawPath(self.paths[row][1], self.pen(self.comparison, 2, (5, 4)))
+            path_count -= 1
+        cv.clipRect(skia.Rect.MakeLTRB(area.left(), area.top(), cursor, area.bottom()))
+        for j in reversed(range(path_count)):
+            path = self.paths[row][j]
+            cv.drawPath(path, self.pen(self.comparison if j else self.trace, 2, (5, 4) if j else ()))
+        if row in self.violations:
+            zero = self.y(row, 0)
+            top, bottom = (area.top(), zero) if row == 2 else (zero, area.bottom())
+            cv.save()
+            cv.clipRect(skia.Rect.MakeLTRB(area.left(), top, area.right(), bottom))
+            cv.drawPath(self.violations[row], self.pen(self.violation, 2))
+            cv.restore()
+        cv.restore()
+
+    def draw_monitor_metrics(self, cv, row, index, right, baseline):
+        fields = self.tracks[row].fields
+        widths = self.metric_widths[row]
+        left = right - sum(widths)
+        box = skia.Rect.MakeLTRB(left, baseline - 19, right, baseline + 7)
+        border = stroke(RULE, 1)
+        cv.drawRect(box, fill(PLOT_BG))
+        cv.drawRect(box, border)
+        for col, (width, label, (_, series)) in enumerate(
+            zip(widths, self.field_names[row], fields)
+        ):
+            value = series[index]
+            readout = self.readout(value)
+            x = left + self.metric_padding
+            key = self.monitor_keys.get(row, {}).get(col)
+            if key is not None:
+                ink, dashed = key
+                self.series_sample(cv, x, baseline, ink, dashed=dashed, width=self.metric_key_width)
+                x += self.metric_key_width + self.metric_key_gap
+            x += text(cv, label, x, baseline, self.tick, MUTED) + self.metric_gap
+            x += text(cv, self.metric_separator, x, baseline, self.tick, MUTED) + self.metric_gap
+            violation_count = label in {"Violations", "Late"} or (row == 3 and label == "Overdue")
+            warning = value.startswith("-") or (violation_count and value not in {"0", "—"})
+            text(cv, readout, x, baseline, self.heading,
+                 self.violation if warning else INK, tab=True)
+            left += width
+
+    def draw_monitors(self, cv, index):
+        now = self.times[index]
+        cursor = self.x(now)
+        events = [(t, label) for t, label in self.run.event_labels if self.start <= t <= now]
+        text(cv, "STL Monitors", self.chart_left, self.title_y, self.title)
+
+        for row, track in enumerate(self.tracks):
+            area = self.area(row)
+            top, bottom = area.top(), area.bottom()
+            header_y = top - 12
+            unit = track.unit.strip().replace("Alarms", "alarms")
+            name = track.heading.removesuffix(" margin").replace(": ", " · ").title()
+            name_width = text(cv, name, area.left(), header_y, "dashboard_monitor_heading")
+            text(cv, f"({unit})", area.left() + name_width + 7, header_y, self.tick, MUTED)
+            self.draw_monitor_metrics(cv, row, index, area.right(), header_y)
+
+            cv.drawRect(area, fill(PLOT_BG))
+            grid = stroke(self.plot_grid, 1)
+            for timestamp in self.time_ticks:
+                x = self.x(timestamp)
+                cv.drawLine(x, top, x, bottom, grid)
+            for value in self.axes[row][0]:
+                y = self.y(row, value)
+                cv.drawLine(area.left(), y, area.right(), y, grid)
+                text(cv, track.format_tick(value), area.left() - 10, y + 5, self.tick, MUTED, "right", tab=True)
+            if row in self.violations:
+                y = self.y(row, 0)
+                cv.drawLine(area.left(), y, area.right(), y, stroke(self.zero_rule, 1))
+            for timestamp, _ in events:
+                x = self.x(timestamp)
+                cv.drawLine(x, top, x, bottom, self.pen(MUTED, 1, (3, 3)))
+            self.draw_paths(cv, row, area, cursor)
+            cv.drawLine(cursor, top, cursor, bottom, stroke(self.cursor_ink, 1.25, 215))
+            note = ("Live Alarm Data Unavailable" if row == 2 and not self.has_alarm_data else
+                    "No Active Recoveries" if row == 3 and not self.has_recovery else None)
+            if note:
+                ticks = self.axes[row][0]
+                note_y = self.y(row, (ticks[-1] + ticks[-2]) / 2)
+                note_width = measure(self.tick, note) + 14
+                box = skia.Rect.MakeXYWH(area.centerX() - note_width / 2, note_y - 9, note_width, 19)
+                cv.drawRect(box, fill(PLOT_BG))
+                text(cv, note, area.centerX(), note_y + 5, self.tick, MUTED, "center")
+            for j, (_, series) in reversed(list(enumerate(track.traces))):
+                value = series[index]
+                if value is None or (row == 3 and j == 1):
+                    continue
+                ink = self.comparison if j else self.violation if self.is_violation(row, value) else self.trace
+                y = self.y(row, value)
+                cv.drawCircle(cursor, y, 4.8 if j else 3.6, fill(CARD if j else ink))
+                cv.drawCircle(cursor, y, 4.8 if j else 3.6, stroke(ink if j else CARD, 1))
+
+        tag = self.readout(f"{now:g} s")
+        half = max(measure(self.tick, tag, True), measure(self.tick, self.readout(f"{self.end:g} s"), True)) / 2 + 9
+        tag_x = min(max(cursor, self.chart_left + half - 8), self.chart_right - half + 8)
+        rect = skia.Rect.MakeXYWH(tag_x - half, bottom + 8, 2 * half, 23)
+        cv.drawLine(cursor, bottom, cursor, rect.top(), stroke(self.cursor_ink, 1.25))
+        cv.drawLine(cursor, rect.top(), tag_x, rect.top(), stroke(self.cursor_ink, 1.25))
+        cv.drawRect(rect, fill(self.trace))
+        text(cv, tag, tag_x, bottom + 24, self.tick, CARD, "center", tab=True)
+        for timestamp in self.time_ticks:
+            text(cv, self.readout(f"{timestamp:g}"), self.x(timestamp), bottom + 45,
+                 self.tick, MUTED, "center", tab=True)
+        text(cv, "Time (s)", (self.chart_left + self.chart_right) / 2, bottom + 70, self.label, MUTED, "center")
+        lane_ends = [self.chart_left, self.chart_left]
+        for timestamp, label in events:
+            width = measure(self.tick, label)
+            x = min(self.x(timestamp), self.chart_right - width)
+            for lane, end in enumerate(lane_ends):
+                if x >= end:
+                    text(cv, label, x, bottom + 92 + lane * 16, self.tick, MUTED)
+                    lane_ends[lane] = x + width + 10
+                    break
+
+    def draw(self, cv, pos, *, show_monitors=True):
+        index, fresh, uav = self.run.at(pos)
+        cv.clear(color(CARD))
+        self.draw_map(cv, index, fresh, uav)
+        if show_monitors:
+            self.draw_monitors(cv, index)
 
 
 class Encoder:
@@ -842,20 +985,31 @@ class Encoder:
 
 def render(run, positions, out, fps, crf=18, limit=None, scale=1.0, *, preset="medium"):
     gif = Path(out).suffix.lower() == ".gif"
-    w0, h0 = (W, canvas_h(run)) if gif else (VIDEO_W, video_height(run))
-    panel = None if gif else MonitorPanel(run, h0)
+    dashboard = R3Dashboard(run)
+    w0, h0 = (dashboard.height if gif else dashboard.width), dashboard.height
     w, h = round(w0 * scale) // 2 * 2, round(h0 * scale) // 2 * 2  # yuv420p needs even sides
     surface = skia.Surface(w, h)
     cv = surface.getCanvas()
+    offset_x = offset_y = 0
+    if gif:
+        # Include the title and outer axis labels when centering the map.
+        cv.save()
+        cv.scale(w / w0, h / h0)
+        dashboard.draw(cv, positions[0], show_monitors=False)
+        cv.restore()
+        pixels = surface.makeImageSnapshot().toarray()
+        content = np.any(pixels != pixels[0, 0], axis=2)
+        rows = np.flatnonzero(content.any(axis=1))
+        cols = np.flatnonzero(content.any(axis=0))
+        offset_x = (w - 1 - cols[0] - cols[-1]) // 2
+        offset_y = (h - 1 - rows[0] - rows[-1]) // 2
     enc = Encoder(out, w, h, fps, crf, preset)
     t0 = time.time()
     for n, pos in enumerate(positions[:limit]):
         cv.save()
+        cv.translate(offset_x, offset_y)
         cv.scale(w / w0, h / h0)
-        if panel is None:
-            draw_frame(cv, run, pos, h0, compact_hud=True)
-        else:
-            draw_video_frame(cv, run, pos, panel)
+        dashboard.draw(cv, pos, show_monitors=not gif)
         cv.restore()
         arr = surface.makeImageSnapshot().toarray(colorType=skia.kRGBA_8888_ColorType)
         enc.write(arr.tobytes())
@@ -883,29 +1037,40 @@ def main():
     ap.add_argument("--speed", type=float, default=20.0, help="simulation seconds per video second")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--stepped", action="store_true")
-    ap.add_argument("--scale", type=float, help="layout scale (default 1.6 for GIF, 1.12 for video or still)")
+    ap.add_argument("--scale", type=float, default=1.0, help="layout scale (default 1)")
     ap.add_argument("--palette", choices=sorted(PALETTES), default="D")
-    ap.add_argument("--at", type=float, default=0.0, help="tick position for --mode still")
+    still_position = ap.add_mutually_exclusive_group()
+    still_position.add_argument("--at", type=float, default=0.0, help="tick position for --mode still")
+    still_position.add_argument("--time", type=float, help="exact sample time in seconds for --mode still")
     a = ap.parse_args()
     global LEVELS
     set_palette(a.palette)
     run = Run(a.data, compact_baseline=a.mode in {"video", "gif"})
-    stem = re.sub(r"[^a-z0-9]+", "-", a.data.stem.lower()).strip("-") or "scenario"
+    category = "multi_depot" if run.extended else "single_depot"
+    prefix = run.study_id if run.extended else "baseline"
+    stem = media_stem(run.title, prefix)
     defaults = {
-        "video": Path(f"assets/multi_depot/videos/{stem}.mp4"),
-        "gif": Path(f"assets/multi_depot/{stem}-surveillance.gif"),
-        "still": Path(f"results/{stem}.png"),
+        "video": Path(f"assets/{category}/videos/{stem}.mp4"),
+        "gif": Path(f"assets/{category}/{stem}.gif"),
+        "still": Path(f"results/{media_stem(a.data.stem)}.png"),
     }
     out = a.out or defaults[a.mode]
     out.parent.mkdir(parents=True, exist_ok=True)
-    scale = a.scale if a.scale is not None else (1.6 if a.mode == "gif" else 1.12)
+    scale = a.scale
     if a.mode == "still":
         LEVELS = 32 if a.stepped else None
-        h = video_height(run)
-        surface = skia.Surface(round(VIDEO_W * scale), round(h * scale))
+        pos = a.at
+        if a.time is not None:
+            pos = next((i for i, frame in enumerate(run.fr) if frame["t"] == a.time), None)
+            if pos is None:
+                ap.error(f"the frame export has no sample at {a.time:g} s")
+        dashboard = R3Dashboard(run)
+        w, h = dashboard.width, dashboard.height
+        width, height = round(w * scale), round(h * scale)
+        surface = skia.Surface(width, height)
         cv = surface.getCanvas()
-        cv.scale(scale, scale)
-        draw_video_frame(cv, run, a.at, MonitorPanel(run, h))
+        cv.scale(width / w, height / h)
+        dashboard.draw(cv, pos)
         surface.makeImageSnapshot().save(str(out), skia.kPNG)
     elif a.mode == "video":
         render(run, video_positions(run, a.fps or 30, speed=a.speed), out, a.fps or 30,

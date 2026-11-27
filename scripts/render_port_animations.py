@@ -12,19 +12,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from export_frames import dump
+from export_frames import R3_VARIANTS, dump
+from media_names import PORT_SCENES, media_stem
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENES = {
-    "R0": ("straight_return_control", "Return metric control", "Straight return metric"),
-    "R1_west": ("single_depot_west", "Single depot: west", "Choset + Round-Robin"),
-    "R1_east": ("single_depot_east", "Single depot: east", "Choset + Round-Robin"),
-    "R1_north": ("single_depot_north", "Single depot: north", "Choset + Round-Robin"),
-    "R2": ("multiple_depots", "Multiple depots", "No obstacles"),
-    "R3": ("no_fly_zones_choset_round_robin", "No-fly zones", "Choset + Round-Robin"),
-    "R4": ("no_fly_zones_single_failure", "Single failure", "Choset + Round-Robin"),
-    "R5": ("no_fly_zones_repeated_failures", "Repeated failures", "Choset + Round-Robin"),
-    "R6": ("no_fly_zones_depot_closure", "Depot closure", "Choset + Round-Robin"),
+    **PORT_SCENES,
+    **{
+        name: (name.lower(), title, "Choset + Round-Robin")
+        for name, (title, _) in R3_VARIANTS.items()
+    },
 }
 
 
@@ -49,10 +46,10 @@ def main() -> None:
         frames = ROOT / "results" / "frames" / f"{stem}.json"
         frames.parent.mkdir(parents=True, exist_ok=True)
         frames.write_text(json.dumps(data, separators=(",", ":")))
-        media_stem = stem.replace("_", "-")
+        output_stem = media_stem(title, name.split("_", 1)[0])
         outputs = {
-            "video": ROOT / "assets" / "multi_depot" / "videos" / f"{media_stem}.mp4",
-            "gif": ROOT / "assets" / "multi_depot" / f"{media_stem}-surveillance.gif",
+            "video": ROOT / "assets" / "multi_depot" / "videos" / f"{output_stem}.mp4",
+            "gif": ROOT / "assets" / "multi_depot" / f"{output_stem}.gif",
         }
         for mode, path in outputs.items():
             if args.mode in ("both", mode):

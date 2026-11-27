@@ -149,6 +149,12 @@ class Monitor:
         beta = self._params.region.zone_margin
         clearance = [air.signed_distance(u.position) - beta for u in flying]
         queue = [d.waiting - d.slots for d in self._depots if d.slots]
+        self.current_violations = {
+            "battery_margin": sum(u.battery < uav.sigma_min for u in flying),
+            "way_home_margin": sum(margin < 0 for margin in way_home),
+            "queue_margin": sum(excess > 0 for excess in queue),
+            "zone_clearance": sum(value < 0 for value in clearance),
+        }
         return {
             "way_home_margin": min(way_home, default=math.nan),
             "zone_clearance": min(

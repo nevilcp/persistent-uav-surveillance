@@ -7,17 +7,33 @@ import json
 import math
 from bisect import bisect_left
 from collections import deque
+from dataclasses import replace
 from pathlib import Path
 
-from run_port_study import BASE_NAMES, runs, single_base
+from media_names import PORT_SCENES
+from run_port_study import BASE_NAMES, PORT, runs, single_base
 from run_scenarios import SCENARIOS
 
 from uav_surveil import Parameters, make_simulation
 from uav_surveil.dispatch import return_threshold
-from uav_surveil.routing import loop_distance
+from uav_surveil.routing import closed_loop_distance
 from uav_surveil.uav import UAVState
 
 ROLLING_WINDOW = 240  # s
+R3_VARIANTS = {
+    "R3_under_provisioned": (
+        "Under-Provisioned",
+        replace(PORT, fleet=replace(PORT.fleet, size=90)),
+    ),
+    "R3_over_provisioned": (
+        "Over-Provisioned",
+        replace(PORT, fleet=replace(PORT.fleet, size=150)),
+    ),
+    "R3_long_horizon": (
+        "Long Horizon",
+        replace(PORT, mission=replace(PORT.mission, duration=9600.0)),
+    ),
+}
 
 
 def scenario(name: str) -> Parameters:
@@ -26,6 +42,8 @@ def scenario(name: str) -> Parameters:
         return SCENARIOS[name]
     if name.startswith("R1_"):
         return single_base(BASE_NAMES.index(name[3:]))
+    if name in R3_VARIANTS:
+        return R3_VARIANTS[name][1]
     return runs()[name]
 
 
@@ -54,6 +72,8 @@ def dump(name: str, params: Parameters | None = None) -> dict:
             t_launch = t
         recent.append(row["coverage_pct"])
         late = sum(a.latency(t) > turnaround for a in sim.monitor.alarms)
+        pending = sim.monitor.open_alarms()
+        overdue = sum(a.latency(t) > turnaround for a in pending)
         margins = row if sim.monitor.extended else sim.monitor.extended_sample(sim.uavs)
         frames.append(
             {
@@ -66,8 +86,11 @@ def dump(name: str, params: Parameters | None = None) -> dict:
                 "routes_unstaffed": int(row["n_routes_uncovered"]),
                 "failed": int(row["n_failed"]),
                 "c2": c2,
+                "current_violations": dict(sim.monitor.current_violations),
                 "c3_missed": late,
                 "c3_alarms": len(sim.monitor.alarms),
+                "c3_pending": len(pending),
+                "c3_overdue": overdue,
                 "cov": row["coverage_pct"],
                 "roll": sum(recent) / len(recent),
                 "battery_margin": finite(row["battery_margin"]),
@@ -94,8 +117,7 @@ def dump(name: str, params: Parameters | None = None) -> dict:
             "t_restored": None if rec is None else mgr.t_fail + rec,
         }
 
-    loop = max(loop_distance(r.cells, sim.airspace) + sim.airspace.distance(r.cells[-1].position, r.cells[0].position)
-               for r in sim.routes) / params.uav.speed
+    loop = max(closed_loop_distance(route, sim.airspace) for route in sim.routes) / params.uav.speed
     # Use the region-edge threshold as a reference for the scenario caption.
     edge = return_threshold(sim.grid.ferry_distance(params.region.depot), params.uav, params.dispatch)
     data = {
@@ -127,8 +149,13 @@ def dump(name: str, params: Parameters | None = None) -> dict:
                                         for m in range(len(bases))) for c in cells),
                                 params.uav, params.dispatch)
         pad = params.region.cell_size * 2
+        title = "Port surveillance"
+        if name in PORT_SCENES:
+            title = PORT_SCENES[name][1]
+        elif name in R3_VARIANTS:
+            title = R3_VARIANTS[name][0]
         data.update(
-            title="Port surveillance",
+            title=title,
             meta=f"{name}  |  {params.patrol.mode.replace('_', ' ').title()}  |  {len(sim.uavs)} UAVs",
             depots=[list(p) for p in bases],
             return_pct=round(edge * 100),
@@ -151,7 +178,9 @@ def finite(value: float) -> float | None:
 def main() -> None:
     """Command-line entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("scenario", choices=[*SCENARIOS, *runs(), *(f"R1_{b}" for b in BASE_NAMES), "all"])
+    parser.add_argument("scenario", choices=[
+        *SCENARIOS, *runs(), *(f"R1_{b}" for b in BASE_NAMES), *R3_VARIANTS, "all",
+    ])
     parser.add_argument("--out", type=Path, default=Path("results/frames"))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
